@@ -30,6 +30,12 @@ fi
 files=($files)
 [[ ${#files[@]} -eq 0 ]] && { echo "nothing to scan"; exit 0; }
 
+# Documented placeholders that are safe by definition:
+#   123456789012 / 111122223333  AWS's own documentation example account ids
+#   *.example.com|org|net        RFC 2606 reserved domains
+#   noreply@                     non-deliverable sender
+ALLOWLIST='123456789012|111122223333|@example\.(com|org|net)|noreply@'
+
 report() { # name, pattern, extra grep flags
   local name="$1" pattern="$2"; shift 2
   local hits
@@ -38,7 +44,8 @@ report() { # name, pattern, extra grep flags
   # very patterns it searches for.
   hits=$(grep -HnIE "$pattern" "$@" -- "${files[@]}" 2>/dev/null \
          | grep -v '^\./scripts/scan_repo\.sh:' \
-         | grep -v '^scripts/scan_repo\.sh:' || true)
+         | grep -v '^scripts/scan_repo\.sh:' \
+         | grep -vE "$ALLOWLIST" || true)
   if [[ -n "$hits" ]]; then
     echo "${RED}FAIL${RST} $name"
     echo "$hits" | sed 's/^/      /' | head -20

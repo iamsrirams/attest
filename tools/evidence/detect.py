@@ -6,6 +6,7 @@ from botocore.exceptions import ClientError
 from strands import tool
 
 from tools.config import AWS_REGION, client
+from tools.evidence._wrap import redacted
 
 
 def _err(e: ClientError) -> dict:
@@ -16,6 +17,7 @@ def _err(e: ClientError) -> dict:
 
 
 @tool
+@redacted
 def get_guardduty_status() -> dict:
     """Check whether GuardDuty has an enabled detector in this region.
 
@@ -54,6 +56,7 @@ def get_guardduty_status() -> dict:
 
 
 @tool
+@redacted
 def get_config_recorder_status() -> dict:
     """Check whether an AWS Config recorder exists and is actively recording.
 

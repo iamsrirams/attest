@@ -6,9 +6,11 @@ from botocore.exceptions import ClientError
 from strands import tool
 
 from tools.config import client
+from tools.evidence._wrap import redacted
 
 
 @tool
+@redacted
 def get_cloudtrail_status() -> dict:
     """Check whether a multi-region CloudTrail trail exists and is actively logging.
 

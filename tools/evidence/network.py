@@ -6,6 +6,7 @@ from botocore.exceptions import ClientError
 from strands import tool
 
 from tools.config import AWS_REGION, client
+from tools.evidence._wrap import redacted
 
 RISKY_PORTS = {22: "SSH", 3389: "RDP"}
 OPEN_CIDRS = {"0.0.0.0/0", "::/0"}
@@ -44,6 +45,7 @@ def _covered_ports(perm: dict) -> list[int]:
 
 
 @tool
+@redacted
 def list_open_security_groups() -> dict:
     """Find security groups allowing 0.0.0.0/0 or ::/0 ingress on port 22 or 3389.
 
@@ -96,6 +98,7 @@ def list_open_security_groups() -> dict:
 
 
 @tool
+@redacted
 def get_default_ebs_encryption() -> dict:
     """Check whether EBS encryption-by-default is enabled for this account/region.
 

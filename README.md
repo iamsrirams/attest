@@ -42,7 +42,7 @@ to reason about partial observability and mark that control `INDETERMINATE`.
 |---|---|---|
 | `ctrl-mfa-users` | All IAM users have MFA | CC6.1 |
 | `ctrl-mfa-root` | Root has MFA, no root access keys | CC6.1 |
-| `ctrl-s3-encryption` | All buckets have default SSE | CC6.7, CC6.8 |
+| `ctrl-s3-encryption` | All buckets use SSE-KMS with a customer-managed key | CC6.7, CC6.8 |
 | `ctrl-s3-public` | All buckets block public access | CC6.6 |
 | `ctrl-cloudtrail` | Multi-region trail, logging on | CC7.2 |
 | `ctrl-key-rotation` | No access keys older than the threshold | CC6.1 |

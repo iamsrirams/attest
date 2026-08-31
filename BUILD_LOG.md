@@ -234,3 +234,96 @@ packet, a screenshot, a demo recording, a commit — must be checked for real
 identities first. This is a product requirement, not just repo hygiene: the
 packet is designed to be handed to a third-party auditor, so identity handling
 in it has to be deliberate. Tracked in STATUS.md.
+
+---
+
+## 2026-09-01 — Pseudonymization and the S3 encryption control
+
+### DECISION: redact at the tool boundary, not the storage boundary
+
+Attest is being run against an account containing real people, so evidence has
+to be pseudonymized. The obvious place is on the way into S3. The better place is
+the moment a tool returns.
+
+`tools/redact.py` + `tools/evidence/_wrap.py` apply redaction *inside* `@tool`:
+
+```python
+@tool
+@redacted
+def list_s3_encryption_status() -> dict: ...
+```
+
+The model therefore never receives a real IAM user name or email at all. Real
+identities cannot leak into the conversation transcript, the run timeline shown
+in the dashboard, a screenshot, or a demo recording — not merely into stored
+evidence. Redaction defaults to ON; it takes an explicit `ATTEST_REDACT=0` to
+disable, because the cost of redacting a scratch account is a slightly less
+readable demo while the cost of the reverse is publishing colleagues' names.
+
+Three properties make it usable rather than merely safe:
+
+- **Deterministic** (salted SHA-256, salt persisted in gitignored
+  `.attest_local/`): the same user maps to the same pseudonym across runs, so
+  run-over-run drift comparison still works.
+- **Structure-preserving**: counts, shapes and cardinality survive, so three
+  distinct users remain three distinct users and the agent's reasoning is intact.
+- **Reversible by the owner only**: a local gitignored map resolves
+  `iam-user-a3f2c1` back to a real name. The pseudonyms travel; the map does not.
+
+Demo resources (`attest-demo-*`) are deliberately exempt so the demo stays
+legible and remediation can address them by real name — but an account id
+embedded in an exempt name is still scrubbed.
+
+Two leaks found and fixed while testing: an exempt bucket name retained the
+12-digit account id suffix, and `arn:aws:iam::<account>:user/<name>` leaked the
+principal because only the account id was being scrubbed. `tests/test_redact.py`
+(19 tests) now asserts directly that no account id, email or known identity
+survives a realistic payload.
+
+**Verified against the live account:** full probe of all 10 tools, then grepped
+the output for the account id, real usernames and any email address — 0 hits,
+with counts and key ages preserved.
+
+### DISCOVERY: an unencrypted S3 bucket can no longer exist
+
+The founding demo moment was "the agent finds an unencrypted bucket, you
+approve, encryption lands, the control flips FAIL → PASS". That is no longer
+constructible.
+
+Since January 2023 S3 applies SSE-S3 (AES256) as an unremovable baseline to
+every bucket. `delete_bucket_encryption` returns success, and
+`get_bucket_encryption` immediately reports AES256 again. Confirmed directly
+against the account: the seeded bucket reported `encrypted: true, AES256` even
+after an explicit delete.
+
+`ctrl-s3-encryption` was therefore rewritten to test encryption **strength**
+rather than presence: *every bucket must use SSE-KMS with a customer-managed
+key*. This is what an enterprise security review actually asks — a
+customer-managed CMK gives auditable key access, rotation and revocation, none of
+which SSE-S3 provides. It is also a stronger authenticity story, because the
+agent must distinguish `AES256` from `aws:kms`, and `aws/s3` (AWS-managed) from a
+real CMK, rather than reading a boolean.
+
+The demo moment is preserved in shape and is now genuinely reproducible:
+
+```
+BEFORE:   AES256   -> FAIL
+          put_bucket_encryption(SSE-KMS, customer CMK)
+AFTER :   aws:kms  -> PASS
+RESTORED: AES256   -> FAIL          (seed script re-arms the demo)
+```
+
+**Verified end to end against the live bucket**, including the restore, so the
+demo is repeatable rather than one-shot.
+
+Consequences: `seed_demo_account.py` now creates a customer-managed CMK
+(`alias/attest-demo`) and forces the demo bucket back to SSE-S3 on every run, so
+re-seeding re-arms the demo after a remediation. `--clean` schedules the key for
+deletion on the minimum 7-day window.
+
+**Cost:** a CMK is ~$1/month — the only recurring charge the demo introduces, far
+inside the budget in PLAN §10, but it is a real charge and `--clean` should be
+run when the project is finished.
+
+The remediation tool is renamed `enable_s3_default_encryption` →
+`enable_s3_kms_encryption` in the catalog to match what it actually does.

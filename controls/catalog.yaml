@@ -33,18 +33,24 @@ controls:
     remediable: false
 
   - id: ctrl-s3-encryption
-    title: All S3 buckets have default server-side encryption
+    title: All S3 buckets encrypt with a customer-managed KMS key
     refs: [CC6.7, CC6.8]
     severity: high
     rationale: >
-      Default SSE guarantees objects are encrypted at rest even when a future
-      writer forgets to ask for it.
+      S3 has applied SSE-S3 (AES256) as an unremovable baseline to every bucket
+      since January 2023, so "is it encrypted" is no longer a meaningful test.
+      What an enterprise review actually asks is whether the customer controls
+      the key: SSE-KMS with a customer-managed CMK gives auditable key access,
+      rotation, and the ability to revoke. SSE-S3 gives none of those.
     candidate_tools: [list_s3_encryption_status]
-    pass_when: Every bucket returns a default SSE configuration.
-    fail_when: At least one bucket has no default SSE configuration.
+    pass_when: Every bucket uses SSE-KMS with a customer-managed key.
+    fail_when: At least one bucket uses only SSE-S3, or an AWS-managed aws/s3 key.
     remediable: true
-    remediation_tool: enable_s3_default_encryption
-    remediation_summary: Apply AES256 (SSE-S3) default encryption to the bucket.
+    remediation_tool: enable_s3_kms_encryption
+    remediation_summary: >
+      Re-key the bucket's default encryption to SSE-KMS using the customer-managed
+      CMK. Affects newly written objects; existing objects keep their current
+      encryption until rewritten.
 
   - id: ctrl-s3-public
     title: All S3 buckets block public access

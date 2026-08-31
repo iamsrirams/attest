@@ -17,6 +17,7 @@ from botocore.exceptions import ClientError
 from strands import tool
 
 from tools.config import MAX_KEY_AGE_DAYS, client
+from tools.evidence._wrap import redacted
 
 # Credential reports can list every user in the account. Keep tool output
 # compact for the model's context window (PLAN §7) by returning only the rows
@@ -54,6 +55,7 @@ def _fetch_credential_report(iam) -> list[dict]:
 
 
 @tool
+@redacted
 def get_iam_credential_report() -> dict:
     """Fetch the IAM credential report: per-user MFA status and access key ages.
 
@@ -122,6 +124,7 @@ def get_iam_credential_report() -> dict:
 
 
 @tool
+@redacted
 def list_iam_users_mfa() -> dict:
     """List every IAM user with their attached MFA devices and console access.
 
@@ -166,6 +169,7 @@ def list_iam_users_mfa() -> dict:
 
 
 @tool
+@redacted
 def get_account_summary() -> dict:
     """Get the IAM account summary: root MFA status and root access key count.
 

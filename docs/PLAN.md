@@ -24,10 +24,18 @@ enterprise security review. It:
 
 ### The north-star demo moment
 
-Everything built serves this: the agent finds an unencrypted bucket, requests
-approval, the human clicks Approve, the S3 console shows encryption land live,
-the agent re-verifies, and the control flips FAIL → PASS with a fresh evidence
-citation.
+Everything built serves this: the agent finds a bucket whose encryption does not
+meet the customer-managed-key requirement, requests approval, the human clicks
+Approve, the S3 console shows the new encryption land live, the agent re-verifies,
+and the control flips FAIL → PASS with a fresh evidence citation.
+
+> Originally specified as "finds an *unencrypted* bucket". S3 has applied SSE-S3
+> as an unremovable baseline to every bucket since January 2023, so a genuinely
+> unencrypted bucket cannot be created and that demo was not constructible. The
+> control now tests encryption *strength* — SSE-KMS with a customer-managed key —
+> which preserves the moment and is what enterprise reviews actually ask for.
+> Verified end to end, including the restore that re-arms the demo. See
+> BUILD_LOG.
 
 ## 2. Hackathon context
 
@@ -107,7 +115,7 @@ Ten controls. The catalog lists *candidate* tools per control; the agent chooses
 |---|---|---|---|
 | ctrl-mfa-users | All IAM users have MFA | CC6.1 | credential report / list_users+mfa |
 | ctrl-mfa-root | Root has MFA, no root access keys | CC6.1 | get_account_summary |
-| ctrl-s3-encryption | All buckets have default SSE | CC6.7/CC6.8 | list_s3_encryption_status |
+| ctrl-s3-encryption | All buckets use SSE-KMS with a customer-managed key | CC6.7/CC6.8 | list_s3_encryption_status |
 | ctrl-s3-public | All buckets block public access | CC6.6 | list_s3_public_access |
 | ctrl-cloudtrail | Multi-region trail, logging on | CC7.2 | get_cloudtrail_status |
 | ctrl-key-rotation | No active access keys older than MAX_KEY_AGE_DAYS | CC6.1 | get_iam_credential_report |

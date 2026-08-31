@@ -29,6 +29,7 @@ BUCKET_DENIED = "attest-demo-denied"
 USER_NO_MFA = "attest-demo-contractor-alice"
 USER_WITH_KEY = "attest-demo-legacy-service"
 SG_NAME = "attest-demo-open"
+KMS_ALIAS = "alias/attest-demo"
 
 # Bucket names are global; suffix with the account id so two people running this
 # do not collide. The account id is resolved at runtime, never committed.
@@ -45,9 +46,36 @@ def _exists(fn, *args, **kwargs) -> bool:
 
 
 # --------------------------------------------------------------------------
-# ctrl-s3-encryption: a bucket with NO default encryption
+# ctrl-s3-encryption: a bucket on SSE-S3 only, i.e. no customer-managed key
+#
+# S3 has applied SSE-S3 (AES256) as an unremovable baseline to every bucket
+# since January 2023: `delete_bucket_encryption` returns success but the bucket
+# reverts to AES256. A genuinely unencrypted bucket can no longer be created, so
+# the control tests encryption *strength* instead — SSE-KMS with a
+# customer-managed key — and this bucket fails it by using only SSE-S3.
 # --------------------------------------------------------------------------
-def seed_unencrypted_bucket(findings: list[str]) -> None:
+def seed_kms_key(findings: list[str]) -> str | None:
+    """Create the customer-managed CMK that remediation will re-key the bucket to.
+
+    A CMK costs ~$1/month. This is the only recurring charge the demo creates.
+    """
+    kms = client("kms")
+    try:
+        return kms.describe_key(KeyId=KMS_ALIAS)["KeyMetadata"]["Arn"]
+    except ClientError:
+        pass
+
+    key = kms.create_key(
+        Description="Attest demo: target key for S3 SSE-KMS remediation",
+        KeyUsage="ENCRYPT_DECRYPT",
+        Tags=[{"TagKey": "project", "TagValue": "attest-demo"}],
+    )["KeyMetadata"]
+    kms.create_alias(AliasName=KMS_ALIAS, TargetKeyId=key["KeyId"])
+    print(f"  + created customer-managed KMS key {KMS_ALIAS} (~$1/month)")
+    return key["Arn"]
+
+
+def seed_sse_s3_only_bucket(findings: list[str]) -> None:
     s3 = client("s3")
     name = _bucket(BUCKET_UNENCRYPTED)
 
@@ -60,13 +88,17 @@ def seed_unencrypted_bucket(findings: list[str]) -> None:
     else:
         print(f"  = bucket {name} exists")
 
-    # S3 applies AES256 by default to new buckets since 2023, so to make this
-    # control genuinely fail we must explicitly remove the encryption config.
-    try:
-        s3.delete_bucket_encryption(Bucket=name)
-        print(f"  ! removed default encryption from {name}")
-    except ClientError as e:
-        print(f"    (delete_bucket_encryption: {e.response['Error']['Code']})")
+    # Force the bucket back to SSE-S3 so re-running the seed after a remediation
+    # demo restores the failing state.
+    s3.put_bucket_encryption(
+        Bucket=name,
+        ServerSideEncryptionConfiguration={
+            "Rules": [
+                {"ApplyServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}
+            ]
+        },
+    )
+    print(f"  ! set {name} to SSE-S3 only (no customer-managed key)")
 
     # Keep public access blocked — we are demonstrating the encryption control,
     # and an actually-public bucket in a real account is not worth the risk.
@@ -79,7 +111,9 @@ def seed_unencrypted_bucket(findings: list[str]) -> None:
             "RestrictPublicBuckets": True,
         },
     )
-    findings.append(f"ctrl-s3-encryption  FAIL  {name} has no default SSE")
+    findings.append(
+        f"ctrl-s3-encryption  FAIL  {name} uses SSE-S3, not a customer-managed KMS key"
+    )
 
 
 # --------------------------------------------------------------------------
@@ -314,6 +348,17 @@ def clean() -> None:
     if not groups:
         print(f"  = security group {SG_NAME} absent")
 
+    # KMS keys cannot be deleted immediately; schedule the shortest window (7d)
+    # so the ~$1/month charge stops.
+    kms = client("kms")
+    try:
+        key_id = kms.describe_key(KeyId=KMS_ALIAS)["KeyMetadata"]["KeyId"]
+        kms.delete_alias(AliasName=KMS_ALIAS)
+        kms.schedule_key_deletion(KeyId=key_id, PendingWindowInDays=7)
+        print(f"  - scheduled KMS key {KMS_ALIAS} for deletion in 7 days")
+    except ClientError as e:
+        print(f"  = KMS key {KMS_ALIAS}: {e.response['Error']['Code']}")
+
 
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
@@ -328,8 +373,10 @@ def main() -> int:
         return 0
 
     findings: list[str] = []
-    print("S3:")
-    seed_unencrypted_bucket(findings)
+    print("KMS:")
+    seed_kms_key(findings)
+    print("\nS3:")
+    seed_sse_s3_only_bucket(findings)
     seed_denied_bucket(findings)
     print("\nIAM:")
     seed_user_without_mfa(findings)
