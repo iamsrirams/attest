@@ -1,14 +1,57 @@
+# --- secrets and credentials -------------------------------------------------
+.env
+.env.*
+!.env.example
+.aws/
+credentials
+*.pem
+*.key
+*_rsa
+*.p12
+*.pfx
+
+# --- local working state (NOT for a public repo) -----------------------------
+# STATUS.md is an ephemeral scratchpad: current blockers, machine-specific
+# notes, and observations about the live AWS account. It stays on disk and out
+# of git. The durable contract is docs/PLAN.md; the decision record is
+# BUILD_LOG.md.
+STATUS.md
+NOTES.local.md
+*.local.md
+scratch/
+
+# --- run artefacts -----------------------------------------------------------
+# Sweep output contains real resource names, IAM user names and account ids.
+runs/
+evidence/
+packets/
+*.evidence.json
+.attest_local/
+
+# --- python ------------------------------------------------------------------
 .venv/
 venv/
 __pycache__/
 *.py[cod]
 *.egg-info/
+.eggs/
+build/
+dist/
 .pytest_cache/
-.env
-.env.local
-*.log
-.DS_Store
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# --- node / frontend ---------------------------------------------------------
 node_modules/
 web/dist/
-.attest_local/
-runs/
+web/.vite/
+npm-debug.log*
+
+# --- editors and OS ----------------------------------------------------------
+.DS_Store
+.idea/
+.vscode/
+*.swp
+*.log

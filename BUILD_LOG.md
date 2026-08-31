@@ -135,3 +135,102 @@ tool (`get_caller_identity` wrapping boto3 STS), asked "Who am I in AWS, and wha
 region am I operating in?". It counts tool invocations and fails loudly if the
 agent answers without calling the tool. Written and wired; **blocked on the
 Bedrock gate above**, so its result is UNVERIFIED.
+
+---
+
+## 2026-09-01 — Phase 0 build-out
+
+### Verified: infrastructure bootstrap
+
+`scripts/bootstrap_aws.py` ran clean against `us-east-1`. Created
+`attest_runs`, `attest_controls`, `attest_evidence`, `attest_approvals`
+(TTL enabled on `expires_at`), `attest_audit_log`, plus the evidence bucket
+(block-public-access on, AES256 default SSE, versioning). Idempotent on re-run.
+
+Evidence bucket name is `{TABLE_PREFIX}-evidence-{account_id}`, resolved at
+runtime from STS so the account id never lands in the repo.
+
+### Verified: demo seeding
+
+`scripts/seed_demo_account.py` ran clean. Real state created:
+
+- an S3 bucket with default encryption explicitly **removed** — S3 has applied
+  AES256 to new buckets by default since 2023, so `delete_bucket_encryption` is
+  required to make `ctrl-s3-encryption` genuinely fail
+- a second bucket with a policy denying `s3:GetEncryptionConfiguration` to the
+  calling principal, to exercise AccessDenied → INDETERMINATE live. The policy
+  denies the *specific* caller, not the account root, to avoid lockout;
+  `s3:DeleteBucketPolicy` is deliberately not denied so `--clean` always works.
+- an IAM console user with no MFA device (random password, never printed, no
+  attached policies)
+- a real, active access key on a second user
+- a security group opening port 22 to `0.0.0.0/0`, attached to no instance
+
+### Verified: 10 evidence tools against live AWS
+
+`scripts/probe_tools.py` — **10/10 returned structured data, 0 raised.** Every
+seeded misconfiguration was detected with correct values.
+
+Design notes worth keeping:
+
+- **Errors are returned as data, never raised.** A permissions gap has to become
+  INDETERMINATE for one control, not an aborted sweep (PLAN §7.5).
+- `ServerSideEncryptionConfigurationNotFoundError` is a legitimate FAIL; any
+  *other* S3 error code means the bucket was unobservable → INDETERMINATE. The
+  tool encodes this as `encrypted: true|false|null` so the model cannot conflate
+  "no encryption" with "could not check".
+- `list_open_security_groups` handles port *ranges* and the all-protocols `-1`
+  rule, so a group opening 0-65535 is correctly caught as exposing both 22
+  and 3389.
+- Credential-report output is capped (`MAX_ROWS_RETURNED = 25`) with counts and a
+  `truncated` flag, per PLAN §7's context-window guidance.
+
+### Confirmed: Strands `@tool` behaviour in 1.54.0
+
+`@tool` returns a `DecoratedFunctionTool` that **remains directly callable**
+(`f(3)` works), and the function's docstring becomes the tool `description` in
+the generated spec. Two consequences:
+
+1. Tools are unit-testable without an agent — no wrapper indirection needed.
+2. **Docstrings are the agent's tool-selection surface.** They are load-bearing
+   product code, not comments. Each one names the control it serves.
+
+### DECISION: repo made public early
+
+Created the public repository at Phase 0 rather than at submission, so the commit
+history is a visible, honest audit trail (PLAN §9).
+
+Publishing early raises the stakes on what may be committed, so two rules now
+apply to every change:
+
+1. **`scripts/scan_repo.sh` must pass before every push.** It greps the working
+   tree for AWS account ids, `AKIA` access key ids, private keys, `.env` files
+   and known-sensitive markers. It is also wired as a local `pre-commit` hook.
+2. **Sweep output never enters the repo.** The evidence tools return live IAM
+   user names, email addresses and resource identifiers. `runs/`, `evidence/`,
+   `packets/` and `*.evidence.json` are gitignored, and no probe output is
+   pasted into documentation.
+
+### DECISION: STATUS.md is local-only, BUILD_LOG.md is public
+
+`STATUS.md` is an ephemeral scratchpad — current blockers, machine-specific
+notes, and observations about the live AWS account being swept. Those
+observations describe a real account's security posture, which must not be
+published. It is now **gitignored** and untracked. It remains the session-resume
+dashboard on disk (PLAN §13), and it was verified that no version containing
+account observations ever reached the remote.
+
+`BUILD_LOG.md` stays tracked. It is the engineering decision record — versions,
+resolved APIs, tradeoffs, gotchas — and it is genuinely useful to a reader
+evaluating the build. The split is: **decisions and rationale are public;
+operational state and anything describing the audited account are not.**
+
+Sensitive operational notes belong in `NOTES.local.md` (gitignored).
+
+### Sanitization rule for evidence
+
+Because Attest sweeps a live account, any artefact that leaves it — a trust
+packet, a screenshot, a demo recording, a commit — must be checked for real
+identities first. This is a product requirement, not just repo hygiene: the
+packet is designed to be handed to a third-party auditor, so identity handling
+in it has to be deliberate. Tracked in STATUS.md.

@@ -229,3 +229,39 @@ The only valid interruptions:
 At the start of EVERY session, before writing any code: read `docs/PLAN.md`,
 `STATUS.md`, and `BUILD_LOG.md` in that order. They are the memory. Then continue
 with the next open task per `STATUS.md`, following the operating protocol above.
+
+## 14. What may and may not be committed
+
+The repository is public. Attest sweeps a live AWS account, so its own output is
+sensitive: real IAM user names, email addresses, resource identifiers, and a
+description of an account's security weaknesses.
+
+**Public (tracked):**
+
+- source, tests, `controls/catalog.yaml`, `infra/`
+- `docs/PLAN.md` — the durable contract
+- `BUILD_LOG.md` — the engineering decision record: versions, resolved APIs,
+  tradeoffs, gotchas
+- `README.md`, `LICENSE`, `SECURITY.md`, `.env.example`
+
+**Local-only (gitignored):**
+
+- `STATUS.md` — ephemeral working state: current blockers, machine-specific
+  notes, and observations about the account being swept
+- `NOTES.local.md`, `*.local.md` — sensitive operational notes
+- `.env`, any credential material
+- `runs/`, `evidence/`, `packets/`, `*.evidence.json` — sweep output
+
+The dividing line: **decisions and rationale are public; operational state and
+anything describing the audited account are not.**
+
+`scripts/scan_repo.sh` enforces this. It runs as a local `pre-commit` hook and in
+CI, and checks for AWS account ids, access key ids, private keys, email
+addresses, AI-attribution watermarks, and accidental tracking of `.env` or
+`STATUS.md`. Install the hook once per clone:
+
+```bash
+ln -sf ../../scripts/scan_repo.sh .git/hooks/pre-commit
+```
+
+If a hit is a false positive, narrow the pattern — never skip the scan.

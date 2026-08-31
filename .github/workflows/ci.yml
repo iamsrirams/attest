@@ -1,0 +1,65 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  scan:
+    name: Secret and PII scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Scan for credentials, account ids and PII
+        run: ./scripts/scan_repo.sh --all
+
+  test:
+    name: Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Import check
+        # Every tool module must import cleanly with no AWS credentials present,
+        # which also proves no import-time boto3 calls crept in.
+        env:
+          AWS_DEFAULT_REGION: us-east-1
+        run: |
+          python -c "
+          from tools.evidence import ALL_EVIDENCE_TOOLS
+          names = [t.tool_spec['name'] for t in ALL_EVIDENCE_TOOLS]
+          assert len(names) == len(set(names)), 'duplicate tool names'
+          for t in ALL_EVIDENCE_TOOLS:
+              spec = t.tool_spec
+              assert spec.get('description'), f'{spec[\"name\"]} has no docstring'
+          print(f'{len(names)} evidence tools import cleanly')
+          "
+      - name: Validate control catalog
+        run: |
+          python -c "
+          import yaml
+          cat = yaml.safe_load(open('controls/catalog.yaml'))
+          ids = [c['id'] for c in cat['controls']]
+          assert len(ids) == len(set(ids)), 'duplicate control ids'
+          for c in cat['controls']:
+              for k in ('id','title','refs','candidate_tools','pass_when','fail_when'):
+                  assert c.get(k), f'{c[\"id\"]} missing {k}'
+          print(f'{len(ids)} controls valid')
+          "
+      - name: Unit tests
+        # Phase 7 adds the suite; tolerate an empty suite until then.
+        run: pytest -q || [ $? -eq 5 ]
