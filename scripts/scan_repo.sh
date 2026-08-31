@@ -12,7 +12,9 @@
 #   ln -sf ../../scripts/scan_repo.sh .git/hooks/pre-commit
 
 set -uo pipefail
-cd "$(dirname "$0")/.." || exit 1
+# Resolve the repo root from git, not from $0: when this runs as a symlinked
+# .git/hooks/pre-commit, dirname "$0" is .git/hooks and "$0/.." is .git.
+cd "$(git rev-parse --show-toplevel)" || exit 1
 
 RED=$'\033[31m'; GRN=$'\033[32m'; YEL=$'\033[33m'; RST=$'\033[0m'
 fails=0
@@ -31,8 +33,12 @@ files=($files)
 report() { # name, pattern, extra grep flags
   local name="$1" pattern="$2"; shift 2
   local hits
-  hits=$(grep -nIE "$pattern" "$@" -- "${files[@]}" 2>/dev/null \
-         | grep -v '^scripts/scan_repo.sh:' || true)
+  # -H forces the filename prefix even when a single file is scanned, so the
+  # self-exclusion below matches reliably. This script necessarily contains the
+  # very patterns it searches for.
+  hits=$(grep -HnIE "$pattern" "$@" -- "${files[@]}" 2>/dev/null \
+         | grep -v '^\./scripts/scan_repo\.sh:' \
+         | grep -v '^scripts/scan_repo\.sh:' || true)
   if [[ -n "$hits" ]]; then
     echo "${RED}FAIL${RST} $name"
     echo "$hits" | sed 's/^/      /' | head -20
