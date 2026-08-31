@@ -452,3 +452,44 @@ Honest accounting (PLAN §5.5). Everything below is written but has not been run
   no-op by design. Needs two verified SES identities.
 
 Test count at this point: 47.
+
+### Two bugs CI caught that local runs could not
+
+Both passed cleanly on this machine and failed in GitHub Actions. Recording them
+because the *reason* they were invisible locally generalises.
+
+**1. `.gitignore` silently untracked a source package.**
+
+The hardened ignore list contained a bare `evidence/`, intended for sweep output
+at the repo root. A pattern without a leading slash matches a directory of that
+name at **any depth**, so it also matched `tools/evidence/` — the evidence tool
+package. Files already tracked stayed tracked, which is why nothing appeared to
+break; but `_wrap.py`, created after the hardening, was never committed. CI
+failed with `ModuleNotFoundError: No module named 'tools.evidence._wrap'` — the
+redaction boundary itself was missing from the published repo.
+
+Fixed by anchoring the artefact patterns: `/runs/`, `/evidence/`, `/packets/`.
+Verified in both directions — the source package is tracked again, and root-level
+artefact directories are still ignored.
+
+The local venv reads from the working tree, so a file that exists on disk but is
+untracked passes every local test and fails everywhere else. This is precisely
+why CI installs the package and imports it rather than trusting a local run.
+
+**2. API tests were integration tests wearing a unit test's clothes.**
+
+Three `/runs/...` and `/approvals/...` 404 tests reached real DynamoDB. They
+passed here because this machine has AWS credentials, and failed in CI with
+`NoCredentialsError`. Rewritten against moto so the 404 paths are exercised
+everywhere.
+
+**Practice adopted:** before pushing a test change, run the suite with
+credentials and `HOME` unset to reproduce CI's environment locally, rather than
+trusting a normal local run:
+
+```bash
+env -u AWS_PROFILE AWS_ACCESS_KEY_ID= AWS_SECRET_ACCESS_KEY= HOME=/tmp/nohome \
+  ./.venv/bin/python -m pytest tests/ -q
+```
+
+CI is green at 47 tests.
