@@ -327,3 +327,128 @@ run when the project is finished.
 
 The remediation tool is renamed `enable_s3_default_encryption` →
 `enable_s3_kms_encryption` in the catalog to match what it actually does.
+
+---
+
+## 2026-09-01 — Agent, gate, state, packet, API
+
+### The agent is assembled — 19 tools
+
+`agent/attest.py` builds the Strands agent and hands it a run manifest. It
+deliberately never calls an evidence tool: tool selection and ordering are the
+model's decisions. There is a comment in the file saying so, because the moment
+someone adds `list_s3_encryption_status()` to that module the project stops
+being an agent and becomes a script.
+
+Toolset: 10 evidence + 8 control-flow (`get_control_catalog`,
+`get_previous_run_findings`, `save_evidence`, `record_finding`,
+`request_approval`, `get_approval_status`, `notify_user`,
+`generate_trust_packet`) + 1 gated remediation.
+
+Two things borrowed from Anthropic's prompt-caching guidance, since caching is a
+prefix match and the render order is tools → system → messages:
+
+- `ALL_TOOLS` is assembled in a fixed order, never from a set or dict iteration.
+- `SYSTEM_PROMPT` is byte-stable — no run id, no timestamp. The volatile per-run
+  data goes in the first user message (`run_manifest`) instead.
+
+### DECISION: the run id is process-local, not a tool argument
+
+`control_flow.set_current_run()` holds it. If `run_id` were a tool parameter the
+model could mistype it and write findings into another run — an integrity bug
+that would be invisible until someone read the wrong packet. Nothing is lost:
+the agent has no legitimate reason to address a different run.
+
+### Verified live: the approval gate
+
+Exercised end to end against the real bucket, checking after every step that the
+bucket was genuinely unchanged:
+
+```
+1. no approval          -> AWAITING_APPROVAL   AES256
+2. PENDING approval     -> AWAITING_APPROVAL   AES256
+3. approval replayed
+   from another bucket  -> AWAITING_APPROVAL   AES256
+4. approved, but a
+   non-demo resource    -> REFUSED             (prefix guard)
+5. APPROVED, bound      -> APPLIED             aws:kms, cmk=True, verified
+6. reuse burned approval-> AWAITING_APPROVAL   (single-use)
+```
+
+Step 4 is the one worth keeping: the prefix guard and the approval check are
+independent, so an approved request for a production resource is still refused.
+Step 6 confirms `mark_applied` burns the approval so one decision cannot
+authorize two writes.
+
+### Verified live: state layer
+
+Evidence archived to S3 and indexed in DynamoDB; verdict validation rejects both
+an invalid verdict string and a verdict citing no evidence; controls, evidence
+and audit entries read back; drift baseline resolved from the previous completed
+run. The S3 object was fetched back and matched the tool output.
+
+Evidence is stored as a JSON *string* rather than a native DynamoDB map. That
+avoids the float/Decimal conversion problem entirely and keeps a byte-exact copy
+of what the tool returned, which is what "cite the evidence" actually requires.
+
+### BUG FOUND AND FIXED: names leaked through lists of bare strings
+
+Rendering the first real trust packet and grepping it for identities found a
+genuine hole in the redaction layer.
+
+`Redactor.walk` passes the *parent* key down when recursing into a list. So for
+`{"buckets": [{"bucket": "prod-secrets"}], "not_meeting_kms_requirement": ["prod-secrets"]}`
+the name inside `buckets` was pseudonymized correctly, while the same name in
+the flat list was handed the key `not_meeting_kms_requirement` — absent from
+`KEY_KINDS` — and fell through to free-text scrubbing, which only catches
+account ids, emails and ARNs. Real bucket names reached the packet.
+
+This is exactly the failure mode the redaction layer exists to prevent, and it
+was invisible until an artefact was rendered and grepped. Two-part fix:
+
+1. The known list-of-names keys are mapped explicitly.
+2. `walk()` now runs a **defensive second pass** that replaces any
+   already-pseudonymized value wherever it still appears verbatim. Adding a tool
+   with a new list key can no longer silently reintroduce the leak; the worst
+   case becomes over-redaction, which is the safe direction.
+
+Also fixed: the packet reintroduced the account id through the evidence
+`s3://` URI, because the evidence bucket name is account-suffixed.
+
+**Lesson recorded:** unit tests on the redactor passed throughout. The bug was
+only visible in the rendered artefact. Grep every artefact that is designed to
+leave the machine, not just the layer that produces it.
+
+### Trust packet
+
+`packet/render.py` emits HTML and JSON from the same model. Design choices worth
+keeping: a verdict citing no evidence renders as a visible defect rather than as
+a claim; controls not assessed in the run are listed explicitly rather than
+silently omitted; drift is shown per control, not only in aggregate. The HTML is
+self-contained, theme-aware and prints cleanly.
+
+### API
+
+FastAPI, polling only. Sweeps run as background tasks behind a single-flight
+lock, so a duplicate trigger is a no-op rather than a second run interleaving
+findings into the same tables — this covers the "duplicate trigger no-ops via
+run lock" failure scenario from PLAN §8 Phase 7.
+
+Verified against live data: every endpoint returns real records, unknown ids
+404, and the packet served over HTTP is leak-free.
+
+### UNVERIFIED, and why
+
+Honest accounting (PLAN §5.5). Everything below is written but has not been run:
+
+- **the sweep itself** — every path through `run_sweep()` calls Bedrock. The
+  agent constructs and all 19 tools are individually verified, but the model has
+  never chosen one. Blocked on the Bedrock use-case form.
+- **`resume_after_decision()`** — the mechanism underneath it is verified live;
+  the model-driven half is not.
+- **`Dockerfile`** — written, NOT built. The Docker daemon is not running on this
+  machine, so the image does not exist. It must not be counted as working.
+- **SES** — `SES_FROM`/`SES_TO` unset, so notifications degrade to a logged
+  no-op by design. Needs two verified SES identities.
+
+Test count at this point: 47.
