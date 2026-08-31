@@ -3,6 +3,11 @@
 Deliberately narrow: these cover routing, validation and the run lock. The
 model-dependent paths (POST /runs actually sweeping, /chat) are covered by the
 integration run, not here.
+
+Endpoints that read DynamoDB run against moto rather than the live account.
+Without that these are integration tests wearing a unit test's clothes — they
+pass on a laptop with credentials and fail in CI, which is exactly what
+happened.
 """
 
 from __future__ import annotations
@@ -10,15 +15,56 @@ from __future__ import annotations
 import pytest
 
 pytest.importorskip("fastapi")
+pytest.importorskip("moto")
+
+import boto3  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+from moto import mock_aws  # noqa: E402
+
+TABLE_KEYS = {
+    "attest_runs": ("run_id", None),
+    "attest_controls": ("run_id", "control_id"),
+    "attest_evidence": ("run_id", "evidence_id"),
+    "attest_approvals": ("approval_id", None),
+    "attest_audit_log": ("run_id", "seq"),
+}
 
 
 @pytest.fixture
 def client(monkeypatch):
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "testing")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "testing")
+    monkeypatch.setenv("AWS_DEFAULT_REGION", "us-east-1")
     monkeypatch.setenv("AWS_REGION", "us-east-1")
-    from api.app import app
 
-    return TestClient(app)
+    with mock_aws():
+        ddb = boto3.client("dynamodb", region_name="us-east-1")
+        for name, (hash_key, range_key) in TABLE_KEYS.items():
+            schema = [{"AttributeName": hash_key, "KeyType": "HASH"}]
+            attrs = [{"AttributeName": hash_key, "AttributeType": "S"}]
+            if range_key:
+                schema.append({"AttributeName": range_key, "KeyType": "RANGE"})
+                attrs.append({"AttributeName": range_key, "AttributeType": "S"})
+            ddb.create_table(
+                TableName=name,
+                KeySchema=schema,
+                AttributeDefinitions=attrs,
+                BillingMode="PAY_PER_REQUEST",
+            )
+
+        from tools import config
+
+        config.client.cache_clear()
+        config.resource.cache_clear()
+        config.account_id.cache_clear()
+
+        from api.app import app
+
+        yield TestClient(app)
+
+        config.client.cache_clear()
+        config.resource.cache_clear()
+        config.account_id.cache_clear()
 
 
 def test_health(client):
