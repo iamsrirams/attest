@@ -229,6 +229,26 @@ class Redactor:
         """Owner-side lookup: pseudonym -> real value."""
         return self._map.get(token)
 
+    def unredact(self, text: str) -> str:
+        """Turn a pseudonymized string back into the real one.
+
+        The inverse of `_sweep`, and the reason the agent can operate entirely in
+        pseudonyms. The model sees `attest-demo-logs-account-f685301e`; AWS only
+        knows `attest-demo-logs-<account-id>`. Without this, an approval would be
+        bound to a resource that does not exist and remediation would fail with
+        NoSuchBucket.
+
+        Applied at the point a name is about to be used against AWS, never to
+        anything the model reads back.
+        """
+        if not isinstance(text, str) or not text:
+            return text
+        # Longest tokens first so a token containing another is replaced whole.
+        for token in sorted(self._map, key=len, reverse=True):
+            if token in text:
+                text = text.replace(token, self._map[token])
+        return text
+
 
 def _load_or_create_salt() -> str:
     """Persist a salt so pseudonyms are stable across runs (drift comparison)."""
@@ -270,3 +290,14 @@ def redaction_enabled() -> bool:
     one is publishing colleagues' identities.
     """
     return os.environ.get("ATTEST_REDACT", "1").lower() not in ("0", "false", "no")
+
+
+def unredact(text: str) -> str:
+    """Resolve a pseudonymized identifier back to the real one.
+
+    Call this at the boundary where a name is used against AWS. Never call it on
+    anything that is returned to the model.
+    """
+    if not redaction_enabled():
+        return text
+    return default_redactor().unredact(text)

@@ -207,3 +207,35 @@ def test_sweep_does_not_touch_exempt_demo_names(r):
     }
     out = r.walk(payload)
     assert out["unencrypted"] == ["attest-demo-logs"]
+
+
+# -- round trip: the agent works in pseudonyms, AWS gets real names -----------
+
+
+def test_unredact_reverses_a_pseudonym(r):
+    token = r.value("bucket", "prod-secrets")
+    assert r.unredact(token) == "prod-secrets"
+
+
+def test_unredact_resolves_a_name_with_an_embedded_pseudonym(r):
+    """The demo case. The agent sees attest-demo-logs-account-<hash> because the
+    account id inside an exempt name is still scrubbed; AWS only knows the real
+    suffix. Without this, an approval binds to a bucket that does not exist and
+    remediation fails with NoSuchBucket."""
+    real = f"attest-demo-logs-{ACCOUNT}"
+    seen = r.value("bucket", real)
+    assert seen != real and ACCOUNT not in seen
+    assert r.unredact(seen) == real
+
+
+def test_unredact_leaves_unknown_text_alone(r):
+    assert r.unredact("attest-demo-logs-plain") == "attest-demo-logs-plain"
+    assert r.unredact("") == ""
+
+
+def test_redact_unredact_is_stable_over_repeats(r):
+    real = f"attest-demo-logs-{ACCOUNT}"
+    seen = r.value("bucket", real)
+    for _ in range(3):
+        assert r.unredact(seen) == real
+        assert r.value("bucket", real) == seen

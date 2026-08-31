@@ -21,6 +21,7 @@ from strands import tool
 from tools import approvals
 from tools.config import client
 from tools.evidence.s3 import KMS_ALGORITHMS, _is_customer_managed
+from tools.redact import unredact
 
 ACTION = "enable_s3_kms_encryption"
 
@@ -65,6 +66,11 @@ def enable_s3_kms_encryption(bucket: str, approval_id: str, kms_key: str) -> dic
     Returns the observed post-change encryption state, re-read from S3, so the
     verdict rests on evidence rather than on the write having been attempted.
     """
+    # The agent addresses resources by pseudonym; AWS only knows the real name.
+    # Resolve first, then every check below operates on the real resource.
+    bucket = unredact(bucket)
+    kms_key = unredact(kms_key)
+
     # 1. Safety boundary first: refuse out-of-scope resources even if approved.
     ok, reason = approvals.guard_resource(bucket)
     if not ok:

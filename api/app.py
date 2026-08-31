@@ -18,6 +18,7 @@ from pydantic import BaseModel
 
 from tools import approvals, state
 from tools.config import AWS_REGION, BEDROCK_MODEL_ID
+from tools.redact import redact
 
 app = FastAPI(
     title="Attest",
@@ -155,7 +156,10 @@ def get_packet_json(run_id: str) -> Any:
 
 @app.get("/approvals")
 def list_approvals(run_id: str = "") -> dict:
-    return {"approvals": approvals.list_pending(run_id=run_id)}
+    # Approval records store the real resource name because remediation needs
+    # it, but the dashboard is on screen during demos and recordings — so what
+    # the browser receives goes through the same redaction as everything else.
+    return {"approvals": redact(approvals.list_pending(run_id=run_id))}
 
 
 @app.get("/approvals/{approval_id}")
@@ -163,7 +167,7 @@ def get_approval(approval_id: str) -> dict:
     record = approvals.get(approval_id)
     if not record:
         raise HTTPException(404, f"approval {approval_id} not found")
-    return record
+    return redact(record)
 
 
 def _decide_and_resume(approval_id: str, approved: bool, decided_by: str) -> dict:

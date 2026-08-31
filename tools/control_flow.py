@@ -15,6 +15,7 @@ from strands import tool
 
 from tools import approvals, notify, state
 from tools.config import CATALOG_PATH
+from tools.redact import redact, unredact
 
 _current_run: dict[str, str] = {"run_id": ""}
 
@@ -140,14 +141,19 @@ def request_approval(
     if not run_id:
         return {"error": "no active run"}
 
-    allowed, guard_reason = approvals.guard_resource(resource)
+    # The agent works in pseudonyms, but the approval must bind to the resource
+    # AWS actually knows, or the remediation tool would later act on a name that
+    # does not exist. Resolve here, at the boundary.
+    real_resource = unredact(resource)
+
+    allowed, guard_reason = approvals.guard_resource(real_resource)
     if not allowed:
         return {"status": "REFUSED", "message": guard_reason}
 
     record = approvals.create(
         run_id=run_id,
         action=action,
-        resource_name=resource,
+        resource_name=real_resource,
         reason=reason,
         control_id=control_id,
     )
@@ -160,6 +166,7 @@ def request_approval(
         "approval_id": record["approval_id"],
         "status": record["status"],
         "action": action,
+        # Echo back the name the agent used, not the resolved one.
         "resource": resource,
         "expires_at": record["expires_at_iso"],
         "next_step": (
@@ -179,7 +186,9 @@ def get_approval_status(approval_id: str) -> dict:
         "approval_id": approval_id,
         "status": record.get("status"),
         "action": record.get("action"),
-        "resource": record.get("resource"),
+        # The record stores the real resource name; give the agent back the
+        # pseudonymized form it uses everywhere else.
+        "resource": redact(record.get("resource", "")),
         "decided_at": record.get("decided_at"),
         "expires_at": record.get("expires_at_iso"),
     }
