@@ -1,0 +1,138 @@
+# Attest control catalog — 10 starter controls mapped to SOC 2 CC-series.
+#
+# IMPORTANT (PLAN §5.1): `candidate_tools` is a HINT, not a plan. The agent
+# decides which tools to call, in what order, and adapts when they fail. Nothing
+# in this file may be interpreted as a fixed execution sequence.
+
+version: 1
+framework: SOC 2 (Trust Services Criteria, CC series)
+
+controls:
+  - id: ctrl-mfa-users
+    title: All IAM users have MFA enabled
+    refs: [CC6.1]
+    severity: high
+    rationale: >
+      Console users without MFA are the single most common finding in a first
+      enterprise security review. A stolen password is enough to take the account.
+    candidate_tools: [get_iam_credential_report, list_iam_users_mfa]
+    pass_when: Every IAM user with a console password has an MFA device attached.
+    fail_when: At least one user with a console password has no MFA device.
+    remediable: false
+
+  - id: ctrl-mfa-root
+    title: Root account has MFA and no access keys
+    refs: [CC6.1]
+    severity: critical
+    rationale: >
+      The root user cannot be constrained by IAM policy. Root access keys are
+      unconstrained, non-expiring credentials and should never exist.
+    candidate_tools: [get_account_summary]
+    pass_when: Root has an MFA device AND zero active access keys.
+    fail_when: Root lacks MFA, or any root access key exists.
+    remediable: false
+
+  - id: ctrl-s3-encryption
+    title: All S3 buckets have default server-side encryption
+    refs: [CC6.7, CC6.8]
+    severity: high
+    rationale: >
+      Default SSE guarantees objects are encrypted at rest even when a future
+      writer forgets to ask for it.
+    candidate_tools: [list_s3_encryption_status]
+    pass_when: Every bucket returns a default SSE configuration.
+    fail_when: At least one bucket has no default SSE configuration.
+    remediable: true
+    remediation_tool: enable_s3_default_encryption
+    remediation_summary: Apply AES256 (SSE-S3) default encryption to the bucket.
+
+  - id: ctrl-s3-public
+    title: All S3 buckets block public access
+    refs: [CC6.6]
+    severity: critical
+    rationale: >
+      Public buckets are the classic breach headline. Block Public Access is the
+      account- and bucket-level backstop against a bad ACL or policy.
+    candidate_tools: [list_s3_public_access]
+    pass_when: Every bucket has all four Block Public Access settings enabled.
+    fail_when: Any bucket leaves any of the four settings disabled.
+    remediable: false
+
+  - id: ctrl-cloudtrail
+    title: A multi-region CloudTrail trail exists and is logging
+    refs: [CC7.2]
+    severity: high
+    rationale: >
+      Without CloudTrail there is no audit history, so no incident can be
+      reconstructed and no control can be evidenced over time.
+    candidate_tools: [get_cloudtrail_status]
+    pass_when: At least one multi-region trail exists and is actively logging.
+    fail_when: No trail exists, or no multi-region trail is logging.
+    remediable: false
+
+  - id: ctrl-key-rotation
+    title: No active IAM access keys older than MAX_KEY_AGE_DAYS
+    refs: [CC6.1]
+    severity: medium
+    rationale: >
+      Long-lived static keys accumulate blast radius. Rotation bounds the window
+      in which a leaked key stays useful.
+    candidate_tools: [get_iam_credential_report]
+    pass_when: No active access key is older than the configured threshold.
+    fail_when: Any active access key exceeds the threshold.
+    # Threshold is env-driven (MAX_KEY_AGE_DAYS, default 90). The demo account
+    # sets it to 1 because seeded keys are genuinely near-zero age — this is a
+    # real config parameter evaluated against real key ages, not fake data.
+    threshold_env: MAX_KEY_AGE_DAYS
+    threshold_default: 90
+    remediable: true
+    remediation_tool: disable_iam_access_key
+    remediation_summary: Set the offending access key to Inactive (reversible).
+
+  - id: ctrl-guardduty
+    title: GuardDuty is enabled
+    refs: [CC7.1]
+    severity: medium
+    rationale: >
+      GuardDuty is the baseline continuous threat detection an auditor expects to
+      see turned on.
+    candidate_tools: [get_guardduty_status]
+    pass_when: At least one detector exists and is ENABLED.
+    fail_when: No detector exists, or every detector is DISABLED.
+    remediable: false
+
+  - id: ctrl-open-sgs
+    title: No security group allows 0.0.0.0/0 on port 22 or 3389
+    refs: [CC6.6]
+    severity: critical
+    rationale: >
+      SSH and RDP open to the entire internet are scanned and brute-forced within
+      minutes of being exposed.
+    candidate_tools: [list_open_security_groups]
+    pass_when: No security group permits 0.0.0.0/0 or ::/0 ingress on 22 or 3389.
+    fail_when: Any security group permits such ingress.
+    remediable: false
+
+  - id: ctrl-ebs-default
+    title: Account-level default EBS encryption is on
+    refs: [CC6.7]
+    severity: medium
+    rationale: >
+      The account default means every future volume is encrypted without relying
+      on the person who launches it.
+    candidate_tools: [get_default_ebs_encryption]
+    pass_when: EBS encryption by default is enabled in the region.
+    fail_when: EBS encryption by default is disabled.
+    remediable: false
+
+  - id: ctrl-config
+    title: AWS Config recorder exists and is recording
+    refs: [CC7.2, CC7.3]
+    severity: medium
+    rationale: >
+      Config provides the resource-configuration timeline auditors use to test
+      whether a control held continuously, not just on the day of the review.
+    candidate_tools: [get_config_recorder_status]
+    pass_when: A configuration recorder exists and is recording.
+    fail_when: No recorder exists, or the recorder is stopped.
+    remediable: false
