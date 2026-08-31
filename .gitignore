@@ -22,9 +22,13 @@ scratch/
 
 # --- run artefacts -----------------------------------------------------------
 # Sweep output contains real resource names, IAM user names and account ids.
-runs/
-evidence/
-packets/
+#
+# Leading slashes are REQUIRED. A bare `evidence/` matches any directory of that
+# name at any depth, which silently untracked the `tools/evidence/` source
+# package and broke CI. Anchor these to the repo root.
+/runs/
+/evidence/
+/packets/
 *.evidence.json
 .attest_local/
 
