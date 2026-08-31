@@ -493,3 +493,75 @@ env -u AWS_PROFILE AWS_ACCESS_KEY_ID= AWS_SECRET_ACCESS_KEY= HOME=/tmp/nohome \
 ```
 
 CI is green at 47 tests.
+
+---
+
+## 2026-09-01 — Dashboard, and the pseudonym round trip
+
+### BUG: the agent would have addressed a bucket that does not exist
+
+Found by screenshotting the dashboard, not by reading code.
+
+Redaction scrubs the account id even from exempt `attest-demo-*` names, so the
+agent sees `attest-demo-logs-account-<hash>` while S3 only knows
+`attest-demo-logs-<account-id>`. The agent would therefore have called
+`request_approval` with a name AWS has never heard of. `guard_resource` passes
+(the prefix is right), the approval binds to the fake name, `check()` passes
+(both sides agree on the fake name) — and then `put_bucket_encryption` fails
+with NoSuchBucket. Every guard would have reported success right up to the write.
+
+That is the north-star demo, so it would have failed live.
+
+Fixed with `Redactor.unredact()`, the inverse of `_sweep`, applied at exactly
+the two points where a name is used against AWS:
+
+- `request_approval` resolves before creating the record, so the approval binds
+  to the resource AWS knows, while echoing the pseudonym back to the agent.
+- `enable_s3_kms_encryption` resolves before the guard, the approval check and
+  the write.
+
+Everything the model reads still comes back pseudonymised —
+`get_approval_status` re-redacts the stored resource — so the agent works
+entirely in pseudonyms and never learns a real name.
+
+Verified end to end using only the name the model can see: the agent's observed
+bucket name goes into `request_approval`, the record binds to the real bucket,
+approval is granted, remediation applies and verifies, the control flips, and
+the bucket is restored to re-arm the demo.
+
+**Lesson, and it is the same one as the packet leak:** both bugs sat between two
+correct layers. Redaction was right, remediation was right, and the seam between
+them was wrong. Unit tests on either side pass. Only exercising the whole path,
+end to end, with the values the real caller would use, finds this class of bug.
+
+### The API redacts approvals for display
+
+Approval records store the real resource because remediation needs it. The
+dashboard is on screen during demos and recordings, so `/approvals` runs its
+response through the same redaction as everything else. The account id was
+visible in the approval card until this was fixed — again, caught in a
+screenshot.
+
+### Dashboard
+
+React + Vite, polling every 2s, no websockets. Run timeline, controls with
+verdicts and cited evidence ids, approval cards, trust packet link.
+
+Node on this machine is broken (Homebrew node 22 against a missing icu4c 74),
+but there is a working node 18 at `/usr/local/bin`. Putting that first on PATH
+is enough — no need to touch the Homebrew install:
+
+```bash
+export PATH=/usr/local/bin:$PATH   # node 18.17.1, npm 9.6.7
+cd web && npm install && npm run dev
+```
+
+### Verified: the approve flow works through the browser
+
+A click on Approve in the dashboard flipped the approval, fired
+`resume_after_decision`, and failed exactly where expected — the Bedrock gate —
+with the error caught and written to the audit log rather than crashing the
+request. The full path from browser to API to decision to resume is proven;
+only the model call at the end of it is blocked.
+
+Test count: 51.
