@@ -27,6 +27,7 @@ from agent.instructions import (
 from tools import approvals, control_flow, state
 from tools.config import AWS_REGION, BEDROCK_MODEL_ID
 from tools.control_flow import (
+    generate_trust_packet,
     get_approval_status,
     get_control_catalog,
     get_previous_run_findings,
@@ -49,6 +50,7 @@ CONTROL_FLOW_TOOLS = [
     request_approval,
     get_approval_status,
     notify_user,
+    generate_trust_packet,
 ]
 
 REMEDIATION_TOOLS = [enable_s3_kms_encryption]

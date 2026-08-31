@@ -217,3 +217,25 @@ def get_previous_run_findings() -> dict:
         "verdicts": {c["control_id"]: c["verdict"] for c in controls},
         "control_count": len(controls),
     }
+
+
+@tool
+def generate_trust_packet() -> dict:
+    """Generate the auditor-ready trust packet for this run.
+
+    Call this once, at the very end, after every control has a recorded verdict.
+    The packet renders each verdict alongside the raw JSON evidence behind it,
+    so a reader can verify any statement independently. A control with no cited
+    evidence is rendered as a visible defect, so make sure every finding cites
+    the evidence you used.
+    """
+    run_id = current_run()
+    if not run_id:
+        return {"error": "no active run"}
+    from packet.render import generate
+
+    out = generate(run_id, upload=True)
+    out.pop("_html", None)
+    out.pop("_json", None)
+    state.append_audit(run_id, "generate_trust_packet", {}, True, str(out.get("counts")))
+    return out

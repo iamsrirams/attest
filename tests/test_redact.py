@@ -164,3 +164,46 @@ def test_pseudonyms_are_stable_across_redactor_instances():
 def test_pseudonym_format_is_readable(r):
     """Pseudonyms should read as identifiers in a report, not as raw hashes."""
     assert re.fullmatch(r"iam-user-[0-9a-f]{8}", r.value("user", "alice"))
+
+
+# -- regression: names in lists of bare strings -------------------------------
+
+
+def test_bare_name_lists_are_redacted(r):
+    """Regression. Walking a list passes the PARENT key to each string, so a
+    list-of-names key not in KEY_KINDS used to leak real bucket names into the
+    trust packet even though the same names were redacted inside `buckets`."""
+    payload = {
+        "buckets": [{"bucket": "prod-secrets", "meets_kms_requirement": False}],
+        "not_meeting_kms_requirement": ["prod-secrets"],
+        "unencrypted": ["prod-secrets"],
+        "not_fully_blocked": ["prod-secrets"],
+        "multi_region_logging_trails": ["prod-trail"],
+    }
+    out = r.walk(payload)
+    blob = repr(out)
+    assert "prod-secrets" not in blob
+    assert "prod-trail" not in blob
+    # and the same bucket maps to the same pseudonym in both places
+    assert out["not_meeting_kms_requirement"][0] == out["buckets"][0]["bucket"]
+
+
+def test_defensive_sweep_catches_an_unknown_key(r):
+    """A key the structure-aware pass does not recognise must still not leak a
+    name that was pseudonymized elsewhere in the same payload."""
+    payload = {
+        "buckets": [{"bucket": "prod-secrets"}],
+        "some_future_field": ["prod-secrets"],
+        "a_sentence": "the bucket prod-secrets is misconfigured",
+    }
+    blob = repr(r.walk(payload))
+    assert "prod-secrets" not in blob
+
+
+def test_sweep_does_not_touch_exempt_demo_names(r):
+    payload = {
+        "buckets": [{"bucket": "attest-demo-logs"}],
+        "unencrypted": ["attest-demo-logs"],
+    }
+    out = r.walk(payload)
+    assert out["unencrypted"] == ["attest-demo-logs"]

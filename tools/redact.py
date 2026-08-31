@@ -66,6 +66,14 @@ KEY_KINDS: dict[str, str] = {
     "access_key_id": "access-key",
     "kms_key": "kms-key",
     "default_kms_key_id": "kms-key",
+    # Keys holding a LIST OF BARE NAMES. These need explicit entries: walking a
+    # list passes the parent key down to each string, so without them the names
+    # fall through to free-text scrubbing and survive intact.
+    "unencrypted": "bucket",
+    "not_meeting_kms_requirement": "bucket",
+    "not_fully_blocked": "bucket",
+    "multi_region_logging_trails": "trail",
+    "open_groups": "sg-name",
 }
 
 # Values that are AWS-owned or structural, never personal. Left in the clear so
@@ -162,13 +170,51 @@ class Redactor:
             return self.pseudonym(kind, value)
         return self._scrub_text(value)
 
+    def _walk1(self, obj: Any, key: str | None = None) -> Any:
+        """Structure-aware pass: redact by key, preserving shape exactly."""
+        if isinstance(obj, dict):
+            return {k: self._walk1(v, key=k) for k, v in obj.items()}
+        if isinstance(obj, list):
+            # A list inherits its parent's key, so `{"unencrypted": ["a","b"]}`
+            # redacts each name as a bucket.
+            return [self._walk1(v, key=key) for v in obj]
+        return self.value(key, obj)
+
+    def _sweep(self, obj: Any) -> Any:
+        """Defensive second pass.
+
+        Replaces any value we have already pseudonymized wherever it still
+        appears verbatim — catching names that reached a key the structure-aware
+        pass does not recognise. Without this, adding a tool that returns a new
+        list-of-names key would silently leak until someone noticed.
+        """
+        pairs = [
+            (real, token)
+            for token, real in self._map.items()
+            if len(real) >= 4 and not _is_exempt(real) and real not in SAFE_VALUES
+        ]
+        if not pairs:
+            return obj
+        # Longest first, so a name that contains another is replaced whole.
+        pairs.sort(key=lambda p: len(p[0]), reverse=True)
+
+        def fix(o: Any) -> Any:
+            if isinstance(o, dict):
+                return {k: fix(v) for k, v in o.items()}
+            if isinstance(o, list):
+                return [fix(v) for v in o]
+            if isinstance(o, str):
+                for real, token in pairs:
+                    if real in o:
+                        o = o.replace(real, token)
+                return o
+            return o
+
+        return fix(obj)
+
     def walk(self, obj: Any, key: str | None = None) -> Any:
         """Recursively redact a tool result, preserving structure exactly."""
-        if isinstance(obj, dict):
-            return {k: self.walk(v, key=k) for k, v in obj.items()}
-        if isinstance(obj, list):
-            return [self.walk(v, key=key) for v in obj]
-        return self.value(key, obj)
+        return self._sweep(self._walk1(obj, key=key))
 
     # -- persistence -----------------------------------------------------
     def save(self) -> None:
