@@ -18,6 +18,7 @@ from strands import Agent
 from strands.agent import SlidingWindowConversationManager
 from strands.models import BedrockModel
 
+from agent.retry import SweepRetryStrategy
 from agent.instructions import (
     SYSTEM_PROMPT,
     approval_rejected,
@@ -26,6 +27,7 @@ from agent.instructions import (
 )
 from tools import approvals, control_flow, state, telemetry
 from tools.config import AWS_REGION, BEDROCK_MODEL_ID
+from tools.redact import redact
 from tools.control_flow import (
     generate_trust_packet,
     get_approval_status,
@@ -71,6 +73,8 @@ def build_agent(callback_handler=None, trace_attrs: dict | None = None) -> Agent
         system_prompt=SYSTEM_PROMPT,
         conversation_manager=SlidingWindowConversationManager(window_size=WINDOW_SIZE),
         callback_handler=callback_handler,
+        # A transient model fault must not cost a whole nightly sweep.
+        retry_strategy=SweepRetryStrategy(max_attempts=3, initial_delay=2),
         name="attest",
         trace_attributes=trace_attrs or {},
     )
@@ -112,10 +116,14 @@ def resume_after_decision(run_id: str, approval_id: str, agent: Agent | None = N
     )
 
     status = record.get("status")
+    # The approval record stores the real resource name because AWS needs it,
+    # but this message goes to the model — which must only ever see pseudonyms.
+    # Without this the model writes the real name into its rationale, and from
+    # there it reaches DynamoDB, the dashboard and the published packet.
     fields = (
         approval_id,
         record.get("action", ""),
-        record.get("resource", ""),
+        redact(record.get("resource", "")),
         record.get("control_id", ""),
     )
     if status == approvals.APPROVED:

@@ -461,10 +461,11 @@ def test_resume_after_approval_applies_verifies_and_reverdicts(aws, monkeypatch)
             "kms_key": f"arn:aws:kms:{REGION}:123456789012:key/abc",
         }
 
-    def recheck() -> dict:
-        from tools import control_flow as cf
+    # Evidence ids are random, so "newest" cannot be found by sorting them.
+    # Snapshot what exists before the resume; anything new is post-change.
+    pre_existing = {e["evidence_id"] for e in state.get_evidence(run_id)}
 
-        ev = state.get_evidence(cf.current_run())
+    def recheck() -> dict:
         return {
             "tool_name": "list_s3_encryption_status",
             "result": {"post_change": "re-read after remediation"},
@@ -474,13 +475,17 @@ def test_resume_after_approval_applies_verifies_and_reverdicts(aws, monkeypatch)
     def new_verdict() -> dict:
         from tools import control_flow as cf
 
-        ev = state.get_evidence(cf.current_run())
+        fresh = [
+            e["evidence_id"]
+            for e in state.get_evidence(cf.current_run())
+            if e["evidence_id"] not in pre_existing
+        ]
         return {
             "control_id": "ctrl-s3-encryption",
             "verdict": "PASS",
             "rationale": f"{BUCKET_BAD} now uses SSE-KMS with a customer-managed key.",
-            # Cite the newest evidence, gathered after the change.
-            "evidence_ids": [sorted(e["evidence_id"] for e in ev)[-1]],
+            # Cite only evidence gathered after the change.
+            "evidence_ids": fresh,
         }
 
     resume_script = [
@@ -548,3 +553,40 @@ def test_resume_after_rejection_leaves_the_control_failing(aws):
         "ApplyServerSideEncryptionByDefault"]
     assert rule["SSEAlgorithm"] == "AES256", "bucket changed despite rejection"
     assert state.get_controls(run_id)[0]["verdict"] == "FAIL"
+
+
+def test_resume_message_never_shows_the_model_a_real_resource_name(aws, monkeypatch):
+    """Regression, found in a live run.
+
+    The approval record stores the real resource name because AWS needs it. The
+    resume message was passing that straight to the model, which then wrote it
+    into its rationale — and from there it reached DynamoDB, the dashboard and
+    the published packet.
+    """
+    from agent import attest as agent_mod
+    from tools import approvals, control_flow, state
+
+    monkeypatch.setenv("ATTEST_REDACT", "1")
+    from tools import redact as redact_mod
+
+    monkeypatch.setattr(redact_mod, "_default", None)
+
+    run_id = state.new_run_id()
+    state.start_run(run_id, trigger="golden", region=REGION)
+    control_flow.set_current_run(run_id)
+
+    real = "attest-demo-logs-123456789012"
+    rec = approvals.create(run_id, "enable_s3_kms_encryption", real, "why")
+    approvals.decide(rec["approval_id"], approved=True)
+
+    seen = {}
+
+    class Capture:
+        def __call__(self, message):
+            seen["message"] = message
+            return "ok"
+
+    agent_mod.resume_after_decision(run_id, rec["approval_id"], agent=Capture())
+
+    assert "123456789012" not in seen["message"], "account id reached the model"
+    assert "attest-demo-logs-" in seen["message"], "resource must stay identifiable"
