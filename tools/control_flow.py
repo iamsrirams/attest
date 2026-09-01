@@ -104,6 +104,18 @@ def record_finding(
             "call save_evidence on the tool result you used"
         }
 
+    # A citation naming evidence that does not exist is worse than no citation:
+    # it reads as substantiated in the packet while pointing at nothing. Check
+    # the ids against what this run actually archived.
+    known = {e["evidence_id"] for e in state.get_evidence(run_id)}
+    unknown = [e for e in evidence_ids if e not in known]
+    if unknown:
+        return {
+            "error": f"unknown evidence_id(s): {', '.join(unknown)}",
+            "detail": "cite only ids returned by save_evidence in this run",
+            "known_evidence_ids": sorted(known),
+        }
+
     item = state.record_control(
         run_id=run_id,
         control_id=control_id,

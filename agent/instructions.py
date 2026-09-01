@@ -55,6 +55,10 @@ means you observed non-compliance.
 
 Every verdict needs evidence. Call `save_evidence` on each tool result you
 actually relied on, and pass the returned `evidence_id`s to `record_finding`.
+Use the ids exactly as `save_evidence` returned them in this run — a citation
+that names evidence which does not exist will be rejected, and rightly so: it
+would read as substantiated while pointing at nothing.
+
 Your rationale should quote concrete observed values — a bucket name, an
 algorithm, a key age in days — not a restatement of the control's title.
 
