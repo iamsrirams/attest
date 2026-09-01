@@ -681,3 +681,82 @@ Test count: 78.
 
 The sweep, approve-and-resume through the model, the Docker image (daemon not
 running), an actual stack deployment, and SES. Recorded in STATUS.md.
+
+---
+
+## 2026-09-01 — Golden run, and the stack deployed for real
+
+### The scripted model, and what it is honestly worth
+
+Bedrock is still gated, so the agent loop had never run. `tests/fake_model.py`
+implements the Strands `Model` interface directly — emitting the Bedrock
+converse-stream event shape — and replays a fixed list of turns. The **real**
+Strands agent loop drives it: real tool dispatch, real conversation management,
+real tool specs.
+
+Being precise about what this proves, because it would be easy to oversell:
+
+- **Proved:** when the model asks for a tool, everything downstream is sound.
+  The tool executes, evidence reaches S3 and DynamoDB, the verdict is recorded
+  and validated, the approval gate holds, the packet renders with citations.
+- **Not proved:** that the model *chooses* the right tools. That judgment is the
+  product and cannot be faked. Tool selection stays UNVERIFIED.
+
+A tool input may be a callable, resolved at call time — a real model reads an id
+out of the previous tool result before citing it, and a scripted one otherwise
+cannot.
+
+### BUG: a fabricated citation was accepted
+
+The golden run found this immediately, and it is the worst class of bug for this
+product.
+
+`record_finding` validated that `evidence_ids` was non-empty but never that the
+ids **existed**. A model that hallucinated `ev-abc123` would have its verdict
+stored looking fully substantiated. The packet catches it at render time and
+marks the control uncited — but by then the finding is already in the database
+and in the API response, and anyone reading the controls endpoint sees a cited
+verdict.
+
+Now validated against the evidence this run actually archived. That also closes
+a subtler case: evidence from *another* run can no longer be cited, which would
+have meant a packet citing observations made at a different time against
+different account state.
+
+The system prompt now states the constraint too, so the agent fails cleanly
+rather than by trial and error.
+
+### The approve-and-resume path is verified
+
+Previously only the halves either side of the model call were proven. With the
+scripted model the whole demo moment runs: the agent asks, a human approves,
+the agent is re-invoked, applies the change, re-reads the resource, and records
+a fresh PASS **citing evidence gathered after the change** rather than reusing
+the pre-change observation. The bucket really moves AES256 to aws:kms, and the
+approval is burnt.
+
+The rejection path too: a model that tries the write anyway after a rejection is
+refused by the gate, the bucket is unchanged, and the control stays FAIL.
+
+### Verified: the stack actually deploys
+
+Change-set validation only proves references resolve. IAM policy syntax and
+service-side constraints are enforced at create time, so the stack was deployed
+for real under `TABLE_PREFIX=attestcf` to avoid colliding with the bootstrapped
+resources.
+
+All 11 resources created. Read back from AWS afterwards rather than trusted:
+
+- `RemediationRole` stored with `s3:PutEncryptionConfiguration` /
+  `GetEncryptionConfiguration` scoped to `arn:aws:s3:::attest-demo-*`, and
+  `iam:UpdateAccessKey` scoped to `user/attest-demo-*`. The prefix confinement is
+  real in the deployed policy, not just in the template.
+- Approvals TTL `ENABLED` on `expires_at`.
+- Schedule created `DISABLED`, as intended.
+- Evidence bucket with all four public-access blocks on.
+
+Then torn down completely — stack deleted, the `Retain`-policy tables and bucket
+removed by hand, and confirmed no `attestcf` resources remain. Nothing left
+accruing cost.
+
+Test count: 94.

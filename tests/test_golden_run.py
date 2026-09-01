@@ -432,3 +432,119 @@ def test_evidence_from_another_run_cannot_be_cited(aws):
         evidence_ids=[stolen],
     )
     assert "error" in out and "unknown evidence_id" in out["error"]
+
+
+# -- approve and resume: the demo moment -------------------------------------
+
+
+def test_resume_after_approval_applies_verifies_and_reverdicts(aws, monkeypatch):
+    """The full demo path with the model scripted.
+
+    The agent asks, a human approves, the agent is re-invoked, applies the
+    change, re-reads the resource, and records a fresh PASS citing new evidence.
+    Until now only the halves either side of the model call were verified.
+    """
+    from agent import attest as agent_mod
+    from strands import Agent
+    from tools import approvals, control_flow, state
+
+    run_id, _, _ = _run(_sweep_script(BUCKET_BAD))
+    aid = approvals.list_pending(run_id=run_id)[0]["approval_id"]
+
+    # The human decides. Nothing before this point may change the bucket.
+    approvals.decide(aid, approved=True, decided_by="test")
+
+    def apply_and_verify() -> dict:
+        return {
+            "bucket": BUCKET_BAD,
+            "approval_id": aid,
+            "kms_key": f"arn:aws:kms:{REGION}:123456789012:key/abc",
+        }
+
+    def recheck() -> dict:
+        from tools import control_flow as cf
+
+        ev = state.get_evidence(cf.current_run())
+        return {
+            "tool_name": "list_s3_encryption_status",
+            "result": {"post_change": "re-read after remediation"},
+            "control_id": "ctrl-s3-encryption",
+        }
+
+    def new_verdict() -> dict:
+        from tools import control_flow as cf
+
+        ev = state.get_evidence(cf.current_run())
+        return {
+            "control_id": "ctrl-s3-encryption",
+            "verdict": "PASS",
+            "rationale": f"{BUCKET_BAD} now uses SSE-KMS with a customer-managed key.",
+            # Cite the newest evidence, gathered after the change.
+            "evidence_ids": [sorted(e["evidence_id"] for e in ev)[-1]],
+        }
+
+    resume_script = [
+        {"tools": [{"name": "enable_s3_kms_encryption", "input": apply_and_verify}]},
+        {"tools": [{"name": "list_s3_encryption_status", "input": {}}]},
+        {"tools": [{"name": "save_evidence", "input": recheck}]},
+        {"tools": [{"name": "record_finding", "input": new_verdict}]},
+        {"text": "Applied and verified. The bucket now uses a customer-managed key."},
+    ]
+
+    control_flow.set_current_run(run_id)
+    model = ScriptedModel(resume_script)
+    from agent.attest import ALL_TOOLS
+    from agent.instructions import SYSTEM_PROMPT
+
+    agent = Agent(model=model, tools=ALL_TOOLS, system_prompt=SYSTEM_PROMPT)
+    agent_mod.resume_after_decision(run_id, aid, agent=agent)
+
+    # The bucket really changed.
+    rule = boto3.client("s3", region_name=REGION).get_bucket_encryption(
+        Bucket=BUCKET_BAD
+    )["ServerSideEncryptionConfiguration"]["Rules"][0][
+        "ApplyServerSideEncryptionByDefault"]
+    assert rule["SSEAlgorithm"] == "aws:kms"
+
+    # The control flipped, and the new verdict cites evidence gathered after
+    # the change rather than reusing the pre-change observation.
+    control = state.get_controls(run_id)[0]
+    assert control["verdict"] == "PASS"
+    evidence = {e["evidence_id"]: e for e in state.get_evidence(run_id)}
+    cited = evidence[control["evidence_ids"][0]]
+    assert "post_change" in cited["result_json"]
+
+    # The approval is burnt.
+    assert approvals.get(aid)["status"] == approvals.APPLIED
+
+
+def test_resume_after_rejection_leaves_the_control_failing(aws):
+    """A declined fix must be recorded as declined, not quietly retried."""
+    from agent import attest as agent_mod
+    from agent.attest import ALL_TOOLS
+    from agent.instructions import SYSTEM_PROMPT
+    from strands import Agent
+    from tools import approvals, control_flow, state
+
+    run_id, _, _ = _run(_sweep_script(BUCKET_BAD))
+    aid = approvals.list_pending(run_id=run_id)[0]["approval_id"]
+    approvals.decide(aid, approved=False, decided_by="test")
+
+    # A model that tries the write anyway must be refused by the gate.
+    script = [
+        {"tools": [{"name": "enable_s3_kms_encryption", "input": {
+            "bucket": BUCKET_BAD, "approval_id": aid, "kms_key": "alias/x",
+        }}]},
+        {"text": "The fix was declined, so the control stays failing."},
+    ]
+    control_flow.set_current_run(run_id)
+    agent = Agent(model=ScriptedModel(script), tools=ALL_TOOLS,
+                  system_prompt=SYSTEM_PROMPT)
+    agent_mod.resume_after_decision(run_id, aid, agent=agent)
+
+    rule = boto3.client("s3", region_name=REGION).get_bucket_encryption(
+        Bucket=BUCKET_BAD
+    )["ServerSideEncryptionConfiguration"]["Rules"][0][
+        "ApplyServerSideEncryptionByDefault"]
+    assert rule["SSEAlgorithm"] == "AES256", "bucket changed despite rejection"
+    assert state.get_controls(run_id)[0]["verdict"] == "FAIL"
