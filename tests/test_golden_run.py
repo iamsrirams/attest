@@ -140,20 +140,19 @@ def _sweep_script(bucket: str) -> list[dict]:
 
 
 def _run(script, run_id=None):
-    """Drive a sweep with a scripted model. Returns (run_id, model, result)."""
-    from agent.attest import ALL_TOOLS
+    """Drive a sweep with a scripted model, through the real entry point.
+
+    Goes via `run_sweep` rather than re-implementing it, so the test exercises
+    the same start/finish bookkeeping production uses — including the check
+    that a sweep recording nothing is not filed as COMPLETE.
+    """
+    from agent.attest import ALL_TOOLS, run_sweep
     from agent.instructions import SYSTEM_PROMPT
     from strands import Agent
-    from tools import control_flow, state
-
-    run_id = run_id or state.new_run_id()
-    state.start_run(run_id, trigger="golden", region=REGION)
-    control_flow.set_current_run(run_id)
 
     model = ScriptedModel(script)
     agent = Agent(model=model, tools=ALL_TOOLS, system_prompt=SYSTEM_PROMPT)
-    result = agent("Begin a compliance sweep.")
-    state.finish_run(run_id, "COMPLETE", str(result))
+    run_id, _, result = run_sweep(trigger="golden", run_id=run_id, agent=agent)
     return run_id, model, result
 
 
@@ -590,3 +589,34 @@ def test_resume_message_never_shows_the_model_a_real_resource_name(aws, monkeypa
 
     assert "123456789012" not in seen["message"], "account id reached the model"
     assert "attest-demo-logs-" in seen["message"], "resource must stay identifiable"
+
+
+def test_a_sweep_that_records_nothing_is_not_marked_complete(aws):
+    """Seen for real: a content filter truncated the model's output mid-answer
+    and the run was filed COMPLETE with zero verdicts. For a compliance tool
+    that reads as "we checked and found nothing wrong", which is the worst
+    possible way to be wrong.
+    """
+    from tools import state
+
+    # The model answers without ever recording a finding.
+    run_id, _, _ = _run([{"text": "Everything looks fine to me."}])
+
+    run = state.get_run(run_id)
+    assert run["status"] == "FAILED"
+    assert "No controls were assessed" in run["summary"]
+    assert state.get_controls(run_id) == []
+
+
+def test_scratchpad_tags_never_reach_the_summary(aws):
+    """Models leak <thinking> into visible output; it must not reach the packet,
+    the dashboard or an email."""
+    from tools import state
+
+    run_id, _, _ = _run(
+        _sweep_script(BUCKET_BAD)[:-1]
+        + [{"text": "<thinking>I should summarise now.</thinking>\n\nOne control is failing."}]
+    )
+    summary = state.get_run(run_id)["summary"]
+    assert "thinking" not in summary.lower()
+    assert "One control is failing." in summary

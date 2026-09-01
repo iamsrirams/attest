@@ -117,7 +117,52 @@ def get_run(run_id: str) -> dict:
 
 @app.get("/runs/{run_id}/controls")
 def get_controls(run_id: str) -> dict:
-    return {"controls": state.get_controls(run_id)}
+    """Verdicts joined with their catalog metadata and drift.
+
+    The dashboard needs severity and the SOC 2 refs to rank findings, and the
+    previous verdict to show what changed — none of which live on the verdict
+    record itself.
+    """
+    import yaml
+
+    from tools.config import CATALOG_PATH
+
+    with open(CATALOG_PATH) as f:
+        meta = {c["id"]: c for c in yaml.safe_load(f).get("controls", [])}
+
+    prev_run = state.previous_run(run_id)
+    prev = (
+        {c["control_id"]: c["verdict"] for c in state.get_controls(prev_run["run_id"])}
+        if prev_run
+        else {}
+    )
+
+    out = []
+    for c in state.get_controls(run_id):
+        m = meta.get(c["control_id"], {})
+        was = prev.get(c["control_id"])
+        now = c["verdict"]
+        if was is None:
+            drift = "new"
+        elif was == now:
+            drift = "unchanged"
+        elif was == "PASS":
+            drift = "regressed"
+        elif now == "PASS":
+            drift = "fixed"
+        else:
+            drift = "changed"
+        out.append({
+            **c,
+            "title": m.get("title", c["control_id"]),
+            "refs": m.get("refs", []),
+            "severity": m.get("severity", ""),
+            "remediable": bool(m.get("remediable")),
+            "previous_verdict": was,
+            "drift": drift,
+        })
+    return {"controls": out, "assessed": len(out), "catalog_size": len(meta),
+            "not_assessed": sorted(set(meta) - {c["control_id"] for c in out})}
 
 
 @app.get("/runs/{run_id}/timeline")

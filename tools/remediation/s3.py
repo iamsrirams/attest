@@ -21,6 +21,7 @@ from strands import tool
 from tools import approvals
 from tools.config import client
 from tools.evidence.s3 import KMS_ALGORITHMS, _is_customer_managed
+from tools.audit import audited
 from tools.redact import redacted, unredact
 
 ACTION = "enable_s3_kms_encryption"
@@ -48,6 +49,7 @@ def _read_encryption(bucket: str) -> dict:
 
 
 @tool
+@audited
 @redacted
 def enable_s3_kms_encryption(bucket: str, approval_id: str, kms_key: str) -> dict:
     """Re-key an S3 bucket's default encryption to SSE-KMS with a customer-managed key.

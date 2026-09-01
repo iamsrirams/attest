@@ -96,6 +96,24 @@ def run_sweep(trigger: str = "manual", run_id: str | None = None, agent: Agent |
         raise
 
     summary = str(result)
+
+    # A sweep that recorded nothing is not a successful sweep, whatever the
+    # model returned. Seen for real: a content filter truncated the output
+    # mid-answer and the run would otherwise have been filed as COMPLETE with
+    # zero verdicts — the worst possible outcome for a compliance tool, because
+    # it reads as "we checked and found nothing wrong".
+    recorded = len(state.get_controls(run_id))
+    if recorded == 0:
+        state.finish_run(
+            run_id,
+            "FAILED",
+            "No controls were assessed. The agent produced no findings — its "
+            "output may have been truncated or blocked. Nothing about this "
+            "account's compliance can be concluded from this run.\n\n"
+            f"Model output was: {summary[:1000]}",
+        )
+        return run_id, agent, result
+
     state.finish_run(run_id, "COMPLETE", summary)
     return run_id, agent, result
 

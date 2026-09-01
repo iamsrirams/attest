@@ -22,6 +22,7 @@ export const api = {
   run: (id) => get(`/runs/${id}`),
   controls: (id) => get(`/runs/${id}/controls`),
   timeline: (id) => get(`/runs/${id}/timeline`),
+  evidence: (id) => get(`/runs/${id}/evidence`),
   approvals: () => get("/approvals"),
   packetUrl: (id) => `${BASE}/runs/${id}/packet`,
   startSweep: () => post("/runs", { trigger: "dashboard" }),

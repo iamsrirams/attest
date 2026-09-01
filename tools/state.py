@@ -15,6 +15,7 @@ copy of what the tool returned, which is what "cite the evidence" requires.
 from __future__ import annotations
 
 import json
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Any
@@ -64,7 +65,7 @@ def finish_run(run_id: str, status: str, summary: str = "") -> None:
         ExpressionAttributeValues={
             ":s": status,
             ":f": utcnow(),
-            ":m": summary[:8000],
+            ":m": clean_summary(summary)[:8000],
         },
     )
 
@@ -81,13 +82,20 @@ def list_runs(limit: int = 20) -> list[dict]:
 
 
 def previous_run(before_run_id: str) -> dict | None:
-    """The most recent COMPLETED run before this one — the drift baseline."""
-    runs = [
-        r
-        for r in list_runs(limit=50)
-        if r["run_id"] != before_run_id and r.get("status") == "COMPLETE"
-    ]
-    return runs[0] if runs else None
+    """The most recent usable run before this one — the drift baseline.
+
+    A run must have recorded verdicts to serve as a baseline. Comparing against
+    an empty run makes every control look new, which silently hides
+    regressions — the one thing drift exists to surface. Older runs predating
+    the empty-sweep check can still be COMPLETE with nothing in them, so this
+    is checked rather than assumed.
+    """
+    for r in list_runs(limit=50):
+        if r["run_id"] == before_run_id or r.get("status") != "COMPLETE":
+            continue
+        if get_controls(r["run_id"]):
+            return r
+    return None
 
 
 # -- controls ----------------------------------------------------------------
@@ -226,3 +234,25 @@ def get_audit(run_id: str) -> list[dict]:
         .get("Items", [])
     )
     return sorted(items, key=lambda a: a.get("seq", ""))
+
+
+# Models sometimes emit their scratchpad into the visible answer. That text is
+# not the summary and must not reach the packet, the dashboard or an email.
+_THINK_RE = re.compile(
+    r"<\s*(thinking|thought|scratchpad|reasoning)\s*>.*?<\s*/\s*\1\s*>",
+    re.IGNORECASE | re.DOTALL,
+)
+_UNCLOSED_RE = re.compile(
+    r"<\s*(thinking|thought|scratchpad|reasoning)\s*>.*\Z", re.IGNORECASE | re.DOTALL
+)
+
+
+def clean_summary(text: str) -> str:
+    """Strip model scratchpad tags and tidy the whitespace they leave behind."""
+    if not text:
+        return ""
+    text = _THINK_RE.sub("", text)
+    # An unclosed tag means the scratchpad ran to the end of the output.
+    text = _UNCLOSED_RE.sub("", text)
+    text = re.sub(r"\n{3,}", "\n\n", text)
+    return text.strip()

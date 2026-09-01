@@ -6,6 +6,7 @@ from botocore.exceptions import ClientError
 from strands import tool
 
 from tools.config import client
+from tools.audit import audited
 from tools.evidence._wrap import redacted
 
 # Retained for completeness. Since January 2023 S3 applies SSE-S3 (AES256) as an
@@ -25,6 +26,7 @@ def _is_customer_managed(key_id: str | None) -> bool:
 
 
 @tool
+@audited
 @redacted
 def list_s3_encryption_status() -> dict:
     """Check the default encryption algorithm and key type for every S3 bucket.
@@ -114,6 +116,7 @@ def list_s3_encryption_status() -> dict:
 
 
 @tool
+@audited
 @redacted
 def list_s3_public_access() -> dict:
     """Check the four Block Public Access settings on every S3 bucket.
