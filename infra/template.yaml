@@ -1,0 +1,328 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Attest — autonomous AWS compliance agent. Provisions the state tables, the
+  evidence bucket, the two IAM roles, and the nightly schedule.
+
+  The two roles are the point of this template. EvidenceRole can read the
+  account but cannot write to it. RemediationRole can perform exactly two write
+  actions on prefix-matched resources and nothing else. Separating them means a
+  compromised sweep cannot modify anything, and a compromised remediation path
+  cannot reach beyond the demo resources.
+
+Parameters:
+  Prefix:
+    Type: String
+    Default: attest
+    AllowedPattern: "[a-z][a-z0-9-]{2,20}"
+    Description: Prefix for table and bucket names.
+
+  DemoPrefix:
+    Type: String
+    Default: attest-demo-
+    Description: >
+      Remediation is confined to resources carrying this prefix. Enforced here
+      in the IAM policy as well as in the tool code, so neither alone is the
+      only thing standing between the agent and a production resource.
+
+  NotificationEmail:
+    Type: String
+    Default: ""
+    Description: SES-verified address for approval requests. Leave blank to skip.
+
+  ScheduleExpression:
+    Type: String
+    Default: "cron(0 7 * * ? *)"
+    Description: Nightly sweep, 07:00 UTC.
+
+  ScheduleEnabled:
+    Type: String
+    Default: "DISABLED"
+    AllowedValues: [ENABLED, DISABLED]
+    Description: >
+      Starts DISABLED on purpose. A schedule that begins firing the moment the
+      stack is created is a surprise, and the first sweep should be watched.
+
+Conditions:
+  HasEmail: !Not [!Equals [!Ref NotificationEmail, ""]]
+
+Resources:
+  # -- state ---------------------------------------------------------------
+
+  RunsTable:
+    Type: AWS::DynamoDB::Table
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      TableName: !Sub "${Prefix}_runs"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: run_id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: run_id, KeyType: HASH }
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }
+      Tags: [{ Key: project, Value: attest }]
+
+  ControlsTable:
+    Type: AWS::DynamoDB::Table
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      TableName: !Sub "${Prefix}_controls"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: run_id, AttributeType: S }
+        - { AttributeName: control_id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: run_id, KeyType: HASH }
+        - { AttributeName: control_id, KeyType: RANGE }
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }
+      Tags: [{ Key: project, Value: attest }]
+
+  EvidenceTable:
+    Type: AWS::DynamoDB::Table
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      TableName: !Sub "${Prefix}_evidence"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: run_id, AttributeType: S }
+        - { AttributeName: evidence_id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: run_id, KeyType: HASH }
+        - { AttributeName: evidence_id, KeyType: RANGE }
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }
+      Tags: [{ Key: project, Value: attest }]
+
+  ApprovalsTable:
+    Type: AWS::DynamoDB::Table
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      TableName: !Sub "${Prefix}_approvals"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: approval_id, AttributeType: S }
+      KeySchema:
+        - { AttributeName: approval_id, KeyType: HASH }
+      # An approval that is never decided expires rather than lingering as a
+      # standing authorization. The tool also checks expiry in code, because TTL
+      # deletion is eventually consistent and can lag by days.
+      TimeToLiveSpecification:
+        AttributeName: expires_at
+        Enabled: true
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }
+      Tags: [{ Key: project, Value: attest }]
+
+  AuditLogTable:
+    Type: AWS::DynamoDB::Table
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      TableName: !Sub "${Prefix}_audit_log"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - { AttributeName: run_id, AttributeType: S }
+        - { AttributeName: seq, AttributeType: S }
+      KeySchema:
+        - { AttributeName: run_id, KeyType: HASH }
+        - { AttributeName: seq, KeyType: RANGE }
+      PointInTimeRecoverySpecification: { PointInTimeRecoveryEnabled: true }
+      Tags: [{ Key: project, Value: attest }]
+
+  EvidenceBucket:
+    Type: AWS::S3::Bucket
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      BucketName: !Sub "${Prefix}-evidence-${AWS::AccountId}"
+      # Attest audits for these settings, so its own bucket has to hold them.
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        BlockPublicPolicy: true
+        IgnorePublicAcls: true
+        RestrictPublicBuckets: true
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault: { SSEAlgorithm: AES256 }
+      VersioningConfiguration: { Status: Enabled }
+      LifecycleConfiguration:
+        Rules:
+          - Id: expire-old-evidence
+            Status: Enabled
+            Prefix: evidence/
+            ExpirationInDays: 400
+            NoncurrentVersionExpirationInDays: 30
+      Tags: [{ Key: project, Value: attest }]
+
+  EvidenceBucketPolicy:
+    Type: AWS::S3::BucketPolicy
+    Properties:
+      Bucket: !Ref EvidenceBucket
+      PolicyDocument:
+        Statement:
+          - Sid: DenyInsecureTransport
+            Effect: Deny
+            Principal: "*"
+            Action: "s3:*"
+            Resource:
+              - !GetAtt EvidenceBucket.Arn
+              - !Sub "${EvidenceBucket.Arn}/*"
+            Condition:
+              Bool: { "aws:SecureTransport": false }
+
+  # -- roles ---------------------------------------------------------------
+
+  # Reads the account. Holds no write permission of any kind, so a sweep cannot
+  # modify anything even if the agent is convinced it should.
+  EvidenceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${Prefix}-evidence-role"
+      Description: Read-only role used for every sweep.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: [lambda.amazonaws.com, bedrock.amazonaws.com] }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/SecurityAudit
+        - arn:aws:iam::aws:policy/ReadOnlyAccess
+      Policies:
+        - PolicyName: attest-state-write
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              # Findings and evidence are Attest's own records, not the audited
+              # account's configuration. Writing them is not a remediation.
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:GetItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !GetAtt RunsTable.Arn
+                  - !GetAtt ControlsTable.Arn
+                  - !GetAtt EvidenceTable.Arn
+                  - !GetAtt ApprovalsTable.Arn
+                  - !GetAtt AuditLogTable.Arn
+              - Effect: Allow
+                Action: [s3:PutObject, s3:GetObject]
+                Resource: !Sub "${EvidenceBucket.Arn}/*"
+              - Effect: Allow
+                Action: [bedrock:InvokeModel, bedrock:InvokeModelWithResponseStream]
+                Resource: "*"
+              - Effect: Allow
+                Action: ses:SendEmail
+                Resource: "*"
+      Tags: [{ Key: project, Value: attest }]
+
+  # Two write actions, scoped to prefix-matched resources. Assumable only from
+  # EvidenceRole, so reaching it requires already holding the sweep's identity.
+  RemediationRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${Prefix}-remediation-role"
+      Description: >
+        Narrow write role. Only the actions the remediation tools perform, only
+        on resources carrying the demo prefix.
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { AWS: !GetAtt EvidenceRole.Arn }
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: attest-remediation
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: S3EncryptionOnDemoBucketsOnly
+                Effect: Allow
+                Action:
+                  - s3:PutEncryptionConfiguration
+                  - s3:GetEncryptionConfiguration
+                Resource: !Sub "arn:aws:s3:::${DemoPrefix}*"
+              - Sid: DeactivateAccessKeys
+                Effect: Allow
+                Action: iam:UpdateAccessKey
+                Resource: !Sub "arn:aws:iam::${AWS::AccountId}:user/${DemoPrefix}*"
+              - Sid: UseTheDemoKey
+                Effect: Allow
+                Action: [kms:DescribeKey, kms:GenerateDataKey]
+                Resource: "*"
+                Condition:
+                  StringLike: { "kms:RequestAlias": !Sub "alias/${DemoPrefix}*" }
+              # The approval record is the authorization, so the role that
+              # performs a write must not be able to create or decide one.
+              - Sid: ReadApprovalsOnly
+                Effect: Allow
+                Action: dynamodb:GetItem
+                Resource: !GetAtt ApprovalsTable.Arn
+              - Sid: BurnApprovalAfterUse
+                Effect: Allow
+                Action: dynamodb:UpdateItem
+                Resource: !GetAtt ApprovalsTable.Arn
+      Tags: [{ Key: project, Value: attest }]
+
+  # -- schedule ------------------------------------------------------------
+
+  SchedulerRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${Prefix}-scheduler-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: scheduler.amazonaws.com }
+            Action: sts:AssumeRole
+            Condition:
+              StringEquals: { "aws:SourceAccount": !Ref AWS::AccountId }
+      Policies:
+        - PolicyName: invoke-sweep
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: lambda:InvokeFunction
+                Resource: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${Prefix}-sweep"
+      Tags: [{ Key: project, Value: attest }]
+
+  NightlySweep:
+    Type: AWS::Scheduler::Schedule
+    Properties:
+      Name: !Sub "${Prefix}-nightly-sweep"
+      Description: Nightly compliance sweep.
+      State: !Ref ScheduleEnabled
+      FlexibleTimeWindow: { Mode: "OFF" }
+      ScheduleExpression: !Ref ScheduleExpression
+      ScheduleExpressionTimezone: UTC
+      Target:
+        Arn: !Sub "arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:${Prefix}-sweep"
+        RoleArn: !GetAtt SchedulerRole.Arn
+        Input: '{"trigger":"schedule"}'
+        RetryPolicy:
+          # A sweep is idempotent per run id but expensive; one retry is enough,
+          # and the API's run lock stops a retry colliding with a live sweep.
+          MaximumRetryAttempts: 1
+          MaximumEventAgeInSeconds: 3600
+
+Outputs:
+  EvidenceBucketName:
+    Value: !Ref EvidenceBucket
+    Export: { Name: !Sub "${AWS::StackName}-evidence-bucket" }
+  EvidenceRoleArn:
+    Value: !GetAtt EvidenceRole.Arn
+    Export: { Name: !Sub "${AWS::StackName}-evidence-role" }
+  RemediationRoleArn:
+    Value: !GetAtt RemediationRole.Arn
+    Export: { Name: !Sub "${AWS::StackName}-remediation-role" }
+  TablePrefix:
+    Value: !Ref Prefix
+  NotificationEmail:
+    Condition: HasEmail
+    Value: !Ref NotificationEmail

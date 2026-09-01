@@ -17,6 +17,7 @@ dependencies = [
     "pydantic==2.13.5",
     "PyYAML==6.0.3",
     "python-dotenv>=1.0.0",
+    "mangum>=0.17",
 ]
 
 [project.optional-dependencies]
