@@ -301,3 +301,28 @@ def unredact(text: str) -> str:
     if not redaction_enabled():
         return text
     return default_redactor().unredact(text)
+
+
+def redacted(fn):
+    """Pseudonymize a tool's return value before the agent ever sees it.
+
+    Applied inside `@tool`, so what the model receives is already redacted:
+
+        @tool
+        @redacted
+        def list_s3_encryption_status() -> dict: ...
+
+    Belongs on any tool whose result reaches the model — including remediation
+    tools, which resolve a pseudonym to a real name internally and would
+    otherwise hand that real name straight back.
+    """
+    import functools
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        result = fn(*args, **kwargs)
+        if not redaction_enabled():
+            return result
+        return redact(result)
+
+    return wrapper
