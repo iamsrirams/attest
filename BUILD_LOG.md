@@ -565,3 +565,119 @@ request. The full path from browser to API to decision to resume is proven;
 only the model call at the end of it is blocked.
 
 Test count: 51.
+
+---
+
+## 2026-09-01 — Phases 6 to 9
+
+### DECISION: Lambda, not AgentCore — but AgentCore is genuinely available
+
+PLAN §8 says decide at Phase 6, so this was checked rather than assumed.
+
+AgentCore **is** reachable in this account: `bedrock-agentcore-control` is in
+boto3 1.43.83, `list_agent_runtimes` succeeds, and `CreateAgentRuntime` accepts
+`agentRuntimeName`, `agentRuntimeArtifact`, `roleArn`. So this is a real choice,
+not a fallback. (The AWS CLI on this machine predates the service; use boto3.)
+
+`agentRuntimeArtifact` takes either `containerConfiguration.containerUri` or
+`codeConfiguration`. The container path means building an image and pushing to
+ECR — and the Docker daemon is not running on this machine, so that cannot even
+be attempted today, let alone verified.
+
+Chose **Lambda + EventBridge Scheduler**, on two grounds:
+
+1. It can be verified now. A deployment path that cannot be exercised is not a
+   deployment path, and PLAN §5.5 forbids marking unverified work as done.
+2. The agent is runtime-agnostic by construction. `agent/handler.py` is the only
+   module that knows what invoked it; `agent/attest.py` contains no Lambda
+   import, and a test asserts that. Moving to AgentCore later is writing a
+   different entry point, not a rewrite.
+
+The container work is not wasted: the Dockerfile is what AgentCore would need,
+and `codeConfiguration` remains an option if the image path stays blocked.
+
+### The template is the security story
+
+Two roles, separated by intent:
+
+- **EvidenceRole** — `ReadOnlyAccess` + `SecurityAudit`, plus write access to
+  Attest's *own* tables and bucket. It holds no permission to modify the account
+  it audits, so a sweep cannot change anything even if the agent is convinced it
+  should.
+- **RemediationRole** — exactly the two write actions the tools perform, scoped
+  to `${DemoPrefix}*` resources, assumable only from EvidenceRole. It can
+  `GetItem` and `UpdateItem` on the approvals table (to read an approval and
+  burn it) but **not** `PutItem` — the role that performs a write cannot
+  manufacture its own authorization.
+
+The prefix guard now exists in two independent places: the tool body and the IAM
+policy. Neither is the only thing standing between the agent and a production
+resource.
+
+`tests/test_infra.py` asserts the remediation role stays narrow. Verified these
+tests actually bite by temporarily widening the policy to `s3:*` on `"*"` and
+watching two of them fail — a regression that would otherwise leave the code
+guard intact while silently deleting the second layer.
+
+Validated the template with a real CloudFormation change set: all 11 resources
+resolve, every `!GetAtt` and `!Sub` valid. Change sets provision nothing, so the
+preview stack was deleted without ever creating a resource.
+
+Schedule ships **DISABLED**. A stack that starts sweeping unattended the moment
+it is created is a surprise, and the first sweep should be watched.
+
+### deploy.sh checks for the bootstrap collision
+
+The first dry run failed with an opaque
+`[AWS::EarlyValidation::ResourceExistenceCheck]` hook error that names nothing.
+Cause: `scripts/bootstrap_aws.py` had already created `attest_*` tables and the
+evidence bucket outside CloudFormation, which will not adopt resources it did
+not create.
+
+The template is fine — re-running with `TABLE_PREFIX=attestx` produced a clean
+11-resource change set. But the error is unhelpful enough to lose an hour to, so
+`deploy.sh` now checks for the conflicting tables and bucket up front and prints
+both ways out (different prefix, or `bootstrap_aws.py --clean`).
+
+### Telemetry
+
+Resolved API for strands-agents 1.54.0: `StrandsTelemetry` from
+`strands.telemetry`, with `setup_otlp_exporter()`, `setup_console_exporter()`
+and `setup_meter()`. `Agent.__init__` takes `name` and `trace_attributes`.
+
+Strands already emits a span per model call and per tool call, so `tools/
+telemetry.py` only picks the exporter and attaches the run context.
+`session.id` is set to the run id, so traces group by sweep — the unit an
+operator actually asks about after a nightly run.
+
+Off unless `ATTEST_TELEMETRY=1`, and setup failures degrade to a warning:
+telemetry that can break a compliance sweep is worse than no telemetry.
+
+Confirmed with the console exporter that spans emit, nest correctly, and carry
+`attest.run_id`, `attest.trigger` and `attest.region`.
+
+### Failure scenarios
+
+`tests/test_failure_modes.py` covers the ways this could quietly produce a wrong
+answer rather than an obvious error — the failure mode that actually matters
+here, since a crash gets noticed and a false PASS does not:
+
+- AccessDenied yields `null`, never `False` and never absent from the unreadable
+  list, so an unobservable bucket cannot be reported as compliant *or* as a
+  finding nobody observed
+- a missing encryption rule is a real FAIL, distinct from an error
+- a whole-tool failure returns error-as-data rather than raising
+- an AWS-managed `aws/s3` key does not satisfy a customer-managed-key control
+- rejection is terminal and stays terminal across repeated checks
+- `resume_after_decision` refuses a PENDING approval, and reads the decision
+  from the record rather than the caller — so a crafted event cannot assert that
+  something was approved
+- uncited and invented verdicts are rejected
+- no tool writes findings without an active run
+
+Test count: 78.
+
+### Still unverified
+
+The sweep, approve-and-resume through the model, the Docker image (daemon not
+running), an actual stack deployment, and SES. Recorded in STATUS.md.
