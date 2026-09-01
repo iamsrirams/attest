@@ -5,7 +5,9 @@
 Built for the AWS Agents for Humans Hackathon (Professional Agents track) on the
 [Strands Agents SDK](https://github.com/strands-agents/sdk-python) and Amazon Bedrock.
 
-> **Status:** early build. See `BUILD_LOG.md` for the decision record.
+> **Status:** the read/judge/approve/fix/report pipeline is built and verified
+> against a live AWS account. The agent's own model loop is blocked on Bedrock
+> model access for this account. See `BUILD_LOG.md` for the decision record.
 
 ## The problem
 
@@ -76,6 +78,27 @@ afterwards:
 ./.venv/bin/python scripts/seed_demo_account.py --clean
 ```
 
+## Deploying
+
+```bash
+./scripts/deploy.sh                       # dry run, shows what would change
+./scripts/deploy.sh --apply --email you@example.com
+./scripts/deploy.sh --apply --enable-schedule   # start the nightly sweep
+```
+
+The stack creates the state tables, the evidence bucket, and two IAM roles:
+`EvidenceRole` can read the account but holds no write permission, and
+`RemediationRole` has only the write actions the tools perform, scoped to
+prefix-matched resources and assumable only from `EvidenceRole`. The nightly
+schedule is created disabled — watch a sweep before letting it run unattended.
+
+## Observability
+
+Strands emits a span per model call and per tool call. Set `ATTEST_TELEMETRY=1`
+and `OTEL_EXPORTER_OTLP_ENDPOINT` to export them; `ATTEST_TELEMETRY_CONSOLE=1`
+prints them locally. Spans carry the run id as `session.id`, so a trace groups
+by sweep.
+
 ## Layout
 
 ```
@@ -86,8 +109,8 @@ tools/
   remediation/ approval-gated write tools
 api/         FastAPI: runs, controls, approvals, chat, packet
 packet/       trust packet rendering
-web/         React + Vite dashboard
-infra/       CloudFormation / SAM
+web/         React + Vite dashboard (polling, no websockets)
+infra/       CloudFormation: tables, bucket, the two IAM roles, schedule
 scripts/     bootstrap, seeding, probes, repo scan
 docs/PLAN.md  the durable build contract
 ```
