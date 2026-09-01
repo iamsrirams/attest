@@ -182,3 +182,37 @@ def test_agent_module_has_no_lambda_import():
     src = (Path(__file__).resolve().parent.parent / "agent" / "attest.py").read_text()
     assert "mangum" not in src.lower()
     assert "lambda_handler" not in src
+
+
+# -- telemetry ---------------------------------------------------------------
+
+
+def test_telemetry_is_off_by_default(monkeypatch):
+    """A local CLI run must not require a collector."""
+    from tools import telemetry
+
+    monkeypatch.delenv("ATTEST_TELEMETRY", raising=False)
+    monkeypatch.delenv("ATTEST_TELEMETRY_CONSOLE", raising=False)
+    assert telemetry.enabled() is False
+    assert telemetry.console_enabled() is False
+
+
+def test_telemetry_setup_never_raises(monkeypatch):
+    """Telemetry that can break a sweep is worse than no telemetry."""
+    from tools import telemetry
+
+    monkeypatch.setattr(telemetry, "_initialized", False)
+    monkeypatch.setenv("ATTEST_TELEMETRY", "1")
+    monkeypatch.delenv("OTEL_EXPORTER_OTLP_ENDPOINT", raising=False)
+    telemetry.setup()  # missing endpoint must warn, not raise
+
+
+def test_trace_attributes_group_by_run():
+    """session.id is the run id so a trace groups by sweep, which is the unit
+    an operator actually asks about."""
+    from tools import telemetry
+
+    attrs = telemetry.trace_attributes("run-1", "schedule", "us-east-1")
+    assert attrs["session.id"] == "run-1"
+    assert attrs["attest.trigger"] == "schedule"
+    assert attrs["service.name"] == "attest"

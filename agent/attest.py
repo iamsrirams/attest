@@ -24,7 +24,7 @@ from agent.instructions import (
     approval_resume,
     run_manifest,
 )
-from tools import approvals, control_flow, state
+from tools import approvals, control_flow, state, telemetry
 from tools.config import AWS_REGION, BEDROCK_MODEL_ID
 from tools.control_flow import (
     generate_trust_packet,
@@ -62,14 +62,17 @@ ALL_TOOLS = [*ALL_EVIDENCE_TOOLS, *CONTROL_FLOW_TOOLS, *REMEDIATION_TOOLS]
 WINDOW_SIZE = int(os.environ.get("ATTEST_WINDOW_SIZE", "40"))
 
 
-def build_agent(callback_handler=None) -> Agent:
+def build_agent(callback_handler=None, trace_attrs: dict | None = None) -> Agent:
     """Construct the Strands agent. No AWS calls happen here."""
+    telemetry.setup()
     return Agent(
         model=BedrockModel(model_id=BEDROCK_MODEL_ID, region_name=AWS_REGION),
         tools=ALL_TOOLS,
         system_prompt=SYSTEM_PROMPT,
         conversation_manager=SlidingWindowConversationManager(window_size=WINDOW_SIZE),
         callback_handler=callback_handler,
+        name="attest",
+        trace_attributes=trace_attrs or {},
     )
 
 
@@ -79,7 +82,9 @@ def run_sweep(trigger: str = "manual", run_id: str | None = None, agent: Agent |
     state.start_run(run_id, trigger=trigger, region=AWS_REGION)
     control_flow.set_current_run(run_id)
 
-    agent = agent or build_agent()
+    agent = agent or build_agent(
+        trace_attrs=telemetry.trace_attributes(run_id, trigger, AWS_REGION)
+    )
     try:
         result = agent(run_manifest(run_id, AWS_REGION, trigger))
     except Exception as e:  # noqa: BLE001 — a crashed sweep must still be recorded
@@ -102,7 +107,9 @@ def resume_after_decision(run_id: str, approval_id: str, agent: Agent | None = N
         raise ValueError(f"approval {approval_id} not found")
 
     control_flow.set_current_run(run_id)
-    agent = agent or build_agent()
+    agent = agent or build_agent(
+        trace_attrs=telemetry.trace_attributes(run_id, "approval-resume", AWS_REGION)
+    )
 
     status = record.get("status")
     fields = (
