@@ -760,3 +760,124 @@ removed by hand, and confirmed no `attestcf` resources remain. Nothing left
 accruing cost.
 
 Test count: 94.
+
+---
+
+## 2026-09-01 — The agent actually runs
+
+### What the Bedrock block actually is
+
+Diagnosed properly rather than repeating the error string. `bedrock:GetUseCaseForModelAccess` returns:
+
+> You have not filled out the request form.
+
+The blocker is the **Anthropic use case details form**, an account-level
+one-time submission. The flow is `PutUseCaseForModelAccess(formData=...)` then
+`CreateFoundationModelAgreement(offerToken=...)`. `ListFoundationModelAgreementOffers`
+confirms an offer is available for Sonnet 4.5 — nothing is missing but the form.
+
+The form is company details plus a legal agreement, so it is the account
+owner's to submit, not something to automate. (The AWS CLI here predates these
+APIs; use boto3.)
+
+**Crucially, the gate is Anthropic-specific.** Probed the other families:
+Nova Micro/Lite/Pro, Llama 3.3 and Mistral Large all invoke fine. So the agent
+loop could be proven immediately, with the configured default left as Sonnet
+4.5 for the submission.
+
+### The Phase 0 gate passes, and so does a full sweep
+
+`scripts/hello_strands.py` with Nova Pro: the agent autonomously selected and
+called the STS tool and answered from its output. **Gate passed.**
+
+Then a full sweep against the live account: all 10 controls assessed, every
+verdict citing evidence, trust packet generated. The audit log shows the
+reasoning that matters:
+
+```
+000001  save_evidence     ev-2fd7d13d48
+000002  record_finding    FAIL          <- ctrl-mfa-users
+000003  record_finding    FAIL          <- ctrl-key-rotation
+```
+
+Two verdicts citing **one** piece of evidence: the agent recognised that the
+credential report answers both MFA coverage and key rotation, and did not fetch
+it twice. That is the behaviour the catalog's `candidate_tools` hints are
+supposed to produce, and it is not scripted anywhere.
+
+It also handled partial observability correctly without being told to:
+
+> "13 buckets use SSE-S3 or AWS-managed KMS keys. Bucket
+> attest-demo-denied-account-f685301e could not be read due to AccessDenied."
+
+Named the unreadable bucket rather than reporting PASS for it.
+
+### Nova is a poor stand-in, for two specific reasons
+
+Worth recording so nobody mistakes it for a working demo configuration:
+
+1. **Content filters block security findings.** Two sweeps died mid-answer with
+   "The generated text has been blocked by our content filters" while the model
+   was listing IAM users without MFA. Legitimate audit output reads as sensitive
+   to the guardrail.
+2. **It skips `request_approval`.** Even after the instruction was tightened, it
+   diagnoses the remediable control correctly and does not ask. Sonnet-class
+   instruction-following is what the demo assumes.
+
+Llama 3.3 is not an option at all: `This model doesn't support tool use in
+streaming mode`.
+
+### BUG: the resume message leaked the real resource name
+
+Third bug of exactly this shape. The approval record stores the real resource
+name because AWS needs it, and `resume_after_decision` passed that record value
+straight into the message handed to the model. The model then wrote the real
+name into its rationale, and from there it reached DynamoDB, the dashboard and
+the published packet.
+
+Same pattern as the first two: two correct layers, wrong seam. Redaction was
+right, the approval record was right, the handoff between them was not.
+
+A fourth instance surfaced immediately after: the remediation tool resolves the
+pseudonym internally and returned the **real** name in its result, which the
+agent then archived as evidence. Fixed by applying the redaction decorator to
+remediation tools too — it belongs on any tool whose result reaches the model,
+not only evidence tools, so it moved from `tools/evidence/_wrap.py` to
+`tools/redact.py`.
+
+### BUG: an empty sweep was filed COMPLETE
+
+When the content filter truncated the model's output, the run was recorded
+COMPLETE with **zero verdicts**. For a compliance tool that reads as "we checked
+and found nothing wrong" — the worst available way to be wrong.
+
+`run_sweep` now checks whether anything was recorded and marks the run FAILED
+with an explicit explanation if not.
+
+A related fix: `previous_run` was returning such an empty run as the drift
+baseline, which made every control look new and would have hidden a regression.
+It now requires the baseline to have recorded verdicts.
+
+### Retry policy
+
+Strands retries only throttling. A malformed tool-use sequence
+(`modelStreamErrorException`) killed a whole sweep. `SweepRetryStrategy` adds
+transient stream faults; everything else still fails fast so a real bug is not
+buried under retries.
+
+### Dashboard
+
+Reworked around the two things that were missing:
+
+- **Evidence is reachable.** Ids were dead text under each verdict; they now
+  expand to the raw JSON the AWS API returned. Traceability is the product, so
+  it has to be one click away.
+- **Severity, SOC 2 refs and drift** are shown, and controls sort worst-first,
+  with a headline stating the account's actual posture.
+
+Every tool now logs to the audit trail, not only control-flow ones. The
+timeline went from `save_evidence -> ev-dcbed19e33` to
+`list_s3_encryption_status -> 14 buckets, 12 without a customer-managed key,
+1 unreadable (9133ms)`.
+
+Test count: 97.
