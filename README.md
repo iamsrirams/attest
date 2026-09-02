@@ -5,9 +5,10 @@
 Built for the AWS Agents for Humans Hackathon (Professional Agents track) on the
 [Strands Agents SDK](https://github.com/strands-agents/sdk-python) and Amazon Bedrock.
 
-> **Status:** the read/judge/approve/fix/report pipeline is built and verified
-> against a live AWS account. The agent's own model loop is blocked on Bedrock
-> model access for this account. See `BUILD_LOG.md` for the decision record.
+> **Status:** working end to end against a live AWS account — the agent sweeps
+> autonomously, cites its evidence, narrates drift, and applies an approved fix
+> before re-checking its own work. `BUILD_LOG.md` is the decision record,
+> including the bugs found along the way.
 
 ## The problem
 
@@ -55,8 +56,15 @@ to reason about partial observability and mark that control `INDETERMINATE`.
 
 ## Quickstart
 
-Requires Python 3.11+, AWS credentials, and Bedrock model access for Claude
-Sonnet 4.5 in your region (including the Anthropic use case details form).
+Requires Python 3.11+ and AWS credentials.
+
+Bedrock model access for Claude Sonnet 4.5 needs the **Anthropic use case
+details form** submitted for your account (Bedrock console → Model access) —
+without it every call returns `ResourceNotFoundException: Model use case details
+have not been submitted`. That gate is Anthropic-specific, so
+`BEDROCK_MODEL_ID=us.amazon.nova-pro-v1:0` will run the agent meanwhile, with
+two caveats: Nova's content filters sometimes block security findings
+mid-answer, and it tends to skip the approval request.
 
 ```bash
 python3 -m venv .venv
@@ -118,6 +126,15 @@ docs/PLAN.md  the durable build contract
 `STATUS.md` is intentionally **not** tracked: it holds working state and
 observations about the account under audit. See `docs/PLAN.md` §14 for what may
 and may not be committed.
+
+## What it looks like running
+
+The dashboard polls a sweep as it happens. Each verdict carries its severity,
+the SOC 2 criteria it maps to, and the evidence ids behind it — expand one and
+you get the raw JSON the AWS API returned. The timeline shows what each call
+found (`list_s3_encryption_status → 14 buckets, 12 without a customer-managed
+key, 1 unreadable`), and the ask panel puts a question to the live account
+rather than to the stored report.
 
 ## Safety
 

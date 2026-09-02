@@ -5,6 +5,11 @@ Recording is human-owned. This is the shot list and the words.
 ## Before you start
 
 ```bash
+# 0. Confirm the Anthropic use case form has cleared for this account, or the
+#    model call fails. Without it, set BEDROCK_MODEL_ID=us.amazon.nova-pro-v1:0
+#    — but rehearse first: Nova's filters can block a sweep mid-answer, and it
+#    tends not to request approval, which is the demo.
+
 # 1. Arm the demo: puts the bucket back on SSE-S3, recreates the seeded findings
 ./.venv/bin/python scripts/seed_demo_account.py
 
@@ -22,7 +27,9 @@ export PATH=/usr/local/bin:$PATH && cd web && npm run dev
 Check before recording:
 
 - [ ] `attest-demo-logs-*` shows **SSE-S3 (AES256)** in the console
-- [ ] The dashboard has at least one previous completed run, so drift has a baseline
+- [ ] The dashboard has at least one previous completed run **with verdicts**,
+      so drift has a baseline — an empty run is skipped, and with no baseline
+      the agent says so rather than implying nothing changed
 - [ ] No pending approvals left over from a rehearsal
 - [ ] `MAX_KEY_AGE_DAYS=1` is set, or the key-rotation control will pass
 
@@ -121,7 +128,8 @@ Scroll to a pseudonym.
 
 ## 3:50–4:30 — it is an agent, not a report
 
-Show the chat box, ask something not in the catalog:
+The **Ask the agent** panel, top of the right column. Click the third example,
+or type something not in the catalog:
 
 > "Which of my S3 buckets would fail a customer-managed key requirement, and
 > which ones can you not check at all?"

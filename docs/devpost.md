@@ -138,15 +138,38 @@ CMK, rather than reading a boolean.
 `anthropic.claude-sonnet-4-5-*` model id is rejected for on-demand throughput;
 the `us.`-prefixed cross-region inference profile is required.
 
-**Two bugs sat between correct layers.** Redaction was right and remediation was
+**Four bugs sat between correct layers.** Redaction was right and remediation was
 right, but the seam between them was not: the agent addressed resources by
 pseudonym while AWS only knows the real name, so an approval would have bound to
 a bucket that does not exist and the write would have failed with NoSuchBucket —
 after every guard reported success. Separately, real bucket names leaked into
 the trust packet through lists of bare strings, because walking a list passes
-the parent key down and those keys matched no redaction rule. Both were found by
-exercising the full path with real values, not by unit tests, which passed
-throughout.
+the parent key down and those keys matched no redaction rule. Two more of the same shape followed: the resume message handed the model the
+approval record's real resource name, and the remediation tool returned the real
+name it had resolved internally — both reaching the published packet through the
+model's own rationale.
+
+Every one was found by exercising the full path with real values. Unit tests on
+either side passed throughout, because each layer was correct; the seam between
+them was not.
+
+## Failing safely
+
+Two failures found by running it for real, both of the same kind — a wrong
+answer that looks like a right one:
+
+- A content filter truncated the model's output mid-answer, and the run was
+  recorded **COMPLETE with zero verdicts**. For a compliance tool that reads as
+  "we checked and found nothing wrong", which is the worst available way to be
+  wrong. A sweep that records nothing is now FAILED, explicitly.
+- That empty run then became the **drift baseline**, which made every control
+  look new and would have hidden a regression. A baseline must now have recorded
+  verdicts.
+
+`record_finding` also accepted citations naming evidence that did not exist —
+found the moment the golden-run test was written. A hallucinated id would have
+been stored looking fully substantiated. Citations are now checked against what
+the run actually archived.
 
 ## What I would build next
 
