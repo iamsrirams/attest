@@ -201,6 +201,80 @@ function ApprovalCard({ a, onDecide, busy }) {
   );
 }
 
+/** Ask the agent something the catalog never anticipated.
+ *
+ * This is what separates an agent from a stored report: the question is not
+ * one of the ten controls, and it goes to the live account, not the database.
+ */
+function Ask() {
+  const [q, setQ] = useState("");
+  const [answer, setAnswer] = useState(null);
+  const [thinking, setThinking] = useState(false);
+  const [err, setErr] = useState("");
+
+  const EXAMPLES = [
+    "Which buckets would fail a customer-managed KMS key requirement?",
+    "Do I have IAM users with console access but no MFA?",
+    "What can you not check in this account, and why?",
+  ];
+
+  async function submit(question) {
+    const text = (question ?? q).trim();
+    if (!text || thinking) return;
+    setQ(text);
+    setThinking(true);
+    setErr("");
+    setAnswer(null);
+    try {
+      const r = await api.ask(text);
+      setAnswer(r.answer);
+    } catch (e) {
+      setErr(e.message);
+    } finally {
+      setThinking(false);
+    }
+  }
+
+  return (
+    <div className="ask">
+      <form
+        onSubmit={(e) => {
+          e.preventDefault();
+          submit();
+        }}
+      >
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Ask about this account…"
+          disabled={thinking}
+        />
+        <button type="submit" disabled={thinking || !q.trim()}>
+          {thinking ? "Looking…" : "Ask"}
+        </button>
+      </form>
+
+      {!answer && !thinking && (
+        <div className="examples">
+          {EXAMPLES.map((x) => (
+            <button key={x} className="chip" onClick={() => submit(x)}>
+              {x}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {thinking && (
+        <div className="asknote">
+          Reading the account now — this is a live check, not a cached answer.
+        </div>
+      )}
+      {err && <div className="uncited">{err}</div>}
+      {answer && <Summary text={answer} />}
+    </div>
+  );
+}
+
 function Timeline({ rows }) {
   if (!rows?.length) return <div className="empty">No tool calls yet.</div>;
   return (
@@ -378,7 +452,10 @@ export default function App() {
         </section>
 
         <section>
-          <h2>What the agent did</h2>
+          <h2>Ask the agent</h2>
+          <Ask />
+
+          <h2 style={{ marginTop: "1.5rem" }}>What the agent did</h2>
           <Timeline rows={timeline.data?.timeline} />
 
           {current?.summary && (

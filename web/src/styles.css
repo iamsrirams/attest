@@ -215,3 +215,21 @@ h2 {
 }
 .summary .sgap { height: .45rem; }
 .summary strong { font-weight: 620; }
+
+/* ask — a live question against the account, not a lookup */
+.ask form { display: flex; gap: .4rem; margin-bottom: .55rem; }
+.ask input {
+  flex: 1; font: inherit; font-size: .87rem; padding: .45rem .65rem;
+  border: 1px solid var(--line); border-radius: 7px;
+  background: var(--panel); color: var(--fg);
+}
+.ask input:focus { outline: none; border-color: var(--accent); }
+.ask input::placeholder { color: var(--muted); }
+.examples { display: flex; flex-direction: column; gap: .3rem; align-items: flex-start; }
+.examples .chip {
+  text-align: left; font-size: .74rem; line-height: 1.35;
+  border: 1px solid var(--line); border-radius: 7px; padding: .3rem .55rem;
+}
+.examples .chip:hover { color: var(--fg); }
+.asknote { color: var(--muted); font-size: .8rem; padding: .5rem 0; }
+.ask .summary { margin-top: .5rem; border-left-color: var(--accent); }

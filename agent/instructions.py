@@ -162,3 +162,26 @@ run. Leave {control_id} at its current failing verdict and note in one line that
 the fix was declined, so the record shows it was surfaced and consciously
 deferred.
 """
+
+
+def ad_hoc_question(question: str) -> str:
+    """Frame a one-off question so the agent answers rather than records.
+
+    The system prompt is written for a sweep, so without this the agent tries to
+    call `save_evidence` and `record_finding` and then reports that it could not.
+    """
+    return f"""\
+This is a one-off question, not a sweep. Do not call `save_evidence`,
+`record_finding`, `request_approval` or `generate_trust_packet` — there is no
+run to write them to, and they will be refused.
+
+Use the read-only evidence tools to find out, then answer directly.
+
+Keep the same distinction you use for verdicts: a feature being **disabled** is
+something you observed, not something you failed to check. Only call something
+unchecked when a tool actually refused you — a permissions error, a throttle, an
+unreachable API. Saying "GuardDuty is off" and "I could not determine whether
+GuardDuty is on" are different answers, and only one of them is true here.
+
+Question: {question}
+"""

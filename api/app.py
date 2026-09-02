@@ -260,18 +260,21 @@ class ChatBody(BaseModel):
 def chat(body: ChatBody) -> dict:
     """Ask the agent a question against the live account.
 
-    Same tools, same read-only guarantees; the agent decides what to call. Used
-    in the demo to show it is genuinely an agent rather than a fixed report.
+    Same tools, same read-only guarantees; the agent decides what to call. This
+    is what shows it is an agent rather than a stored report — the question can
+    be one the catalog never anticipated.
     """
     from agent.attest import build_agent
+    from agent.instructions import ad_hoc_question
     from tools import control_flow
+    from tools.state import clean_summary
 
-    if body.run_id:
-        control_flow.set_current_run(body.run_id)
+    # No run context, so nothing here can write findings into a sweep's record.
+    control_flow.set_current_run("")
 
     agent = build_agent()
-    result = agent(body.question)
-    return {"answer": str(result)}
+    result = agent(ad_hoc_question(body.question))
+    return {"answer": clean_summary(str(result))}
 
 
 @app.get("/catalog")

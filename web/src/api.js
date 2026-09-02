@@ -24,6 +24,7 @@ export const api = {
   timeline: (id) => get(`/runs/${id}/timeline`),
   evidence: (id) => get(`/runs/${id}/evidence`),
   approvals: () => get("/approvals"),
+  ask: (question) => post("/chat", { question }),
   packetUrl: (id) => `${BASE}/runs/${id}/packet`,
   startSweep: () => post("/runs", { trigger: "dashboard" }),
   approve: (aid) => post(`/approvals/${aid}/approve`, { decided_by: "dashboard" }),

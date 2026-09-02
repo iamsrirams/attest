@@ -620,3 +620,43 @@ def test_scratchpad_tags_never_reach_the_summary(aws):
     summary = state.get_run(run_id)["summary"]
     assert "thinking" not in summary.lower()
     assert "One control is failing." in summary
+
+
+# -- ad-hoc questions --------------------------------------------------------
+
+
+def test_ad_hoc_framing_forbids_recording_and_keeps_the_observability_rule():
+    """A one-off question has no run to write to, and the model must not blur
+    'disabled' into 'could not check' — the same distinction verdicts turn on."""
+    from agent.instructions import ad_hoc_question
+
+    msg = ad_hoc_question("Which buckets are unencrypted?")
+    for forbidden in ("save_evidence", "record_finding", "request_approval"):
+        assert forbidden in msg  # named so the model knows not to call them
+    assert "not a sweep" in msg.lower()
+    assert "disabled" in msg.lower()
+    assert "Which buckets are unencrypted?" in msg
+
+
+def test_chat_clears_the_run_context(aws, monkeypatch):
+    """Without a run, an ad-hoc question cannot write findings into a sweep's
+    record even if the model tries."""
+    from fastapi.testclient import TestClient
+
+    from tools import control_flow
+
+    run_id, _, _ = _run(_sweep_script(BUCKET_BAD))
+    control_flow.set_current_run(run_id)
+
+    import agent.attest as agent_mod
+
+    monkeypatch.setattr(
+        agent_mod, "build_agent", lambda *a, **k: (lambda msg: "an answer")
+    )
+
+    from api.app import app
+
+    r = TestClient(app).post("/chat", json={"question": "anything"})
+    assert r.status_code == 200
+    assert r.json()["answer"] == "an answer"
+    assert control_flow.current_run() == ""
