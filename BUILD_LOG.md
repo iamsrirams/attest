@@ -881,3 +881,78 @@ timeline went from `save_evidence -> ev-dcbed19e33` to
 1 unreadable (9133ms)`.
 
 Test count: 97.
+
+---
+
+## 2026-09-02 — Ad-hoc questions, and drift that actually narrates
+
+### The ask panel
+
+The demo script called for an ad-hoc question, and the endpoint existed, but
+nothing in the UI reached it. That is the part which shows this is an agent
+rather than a stored report — the question can be one the catalog never
+anticipated — so it needed to be visible.
+
+Two fixes it required:
+
+- **No run context.** The system prompt is written for a sweep, so the agent
+  tried to `save_evidence` and `record_finding`, then reported that it could
+  not. `ad_hoc_question()` frames the request and names the tools not to reach
+  for; the endpoint clears the current run so nothing can write into a sweep's
+  record even if the model tries.
+- **Scratchpad tags.** Same leak as the summary, so the answer goes through
+  `clean_summary` too.
+
+Also carried the observability rule into ad-hoc answers. Asked what it could not
+check, the agent listed GuardDuty as unchecked — when it *had* checked it and
+found it disabled. "GuardDuty is off" and "I could not determine whether
+GuardDuty is on" are different answers, and only one was true. That is exactly
+the conflation the verdict rules exist to prevent, so the ad-hoc framing now
+states it as well.
+
+### BUG: drift was computed but never narrated
+
+`ctrl-key-rotation` genuinely flipped between two runs and the agent said
+nothing about it. The audit log showed why: it went straight to the evidence
+tools and never called `get_previous_run_findings` — nor `get_control_catalog`.
+
+Re-reading PLAN §7: *"Input: run manifest (run_id, control catalog, previous run
+results)"*. The plan always intended the manifest to **carry** previous results.
+It had been built as a tool instead, which made a headline feature depend on the
+model remembering to look it up.
+
+The manifest now includes the previous run's verdicts and asks for regressions
+first. `get_previous_run_findings` stays, for re-checking mid-sweep.
+
+**Verified on a live run.** With the baseline in the manifest, the agent
+produced:
+
+> The single most urgent issue is the failure of `ctrl-key-rotation` [...] This
+> is a regression from the previous run.
+>
+> **Regressions:** ctrl-key-rotation [...] **Fixes:** None. **Still Failing:** ...
+
+That is the Phase 3 definition of done, met with a real model.
+
+The drift was created honestly, without touching infrastructure: `MAX_KEY_AGE_DAYS`
+is a real threshold evaluated against real key ages, so raising it and lowering
+it flips the control legitimately. Worth noting *why* that route was needed — in
+a production account there is no safe way to flip an account-level control like
+GuardDuty or EBS default encryption just to demonstrate drift. The demo-prefix
+boundary that protects the account also limits what drift can be staged in it.
+
+### BUG: a run could complete with a blank summary
+
+The same sweep recorded all 10 verdicts and returned no closing text. The
+verdicts are the substance, so the run is genuinely complete — but the packet
+and dashboard would show an empty summary.
+
+`run_sweep` now falls back to a summary derived from the recorded verdicts,
+explicitly labelled as generated rather than the agent's own words. Derived from
+stored data, never invented.
+
+Note the interaction with the earlier empty-sweep check: zero verdicts is a
+FAILED run, verdicts-but-no-text is a COMPLETE run with a derived summary. Those
+are different failures and are treated differently.
+
+Test count: 102.
