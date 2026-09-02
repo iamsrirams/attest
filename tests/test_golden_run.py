@@ -660,3 +660,62 @@ def test_chat_clears_the_run_context(aws, monkeypatch):
     assert r.status_code == 200
     assert r.json()["answer"] == "an answer"
     assert control_flow.current_run() == ""
+
+
+# -- drift baseline and summary fallback -------------------------------------
+
+
+def test_the_manifest_carries_the_previous_run_verdicts(aws):
+    """Observed in a real sweep: the agent went straight to the evidence tools,
+    never called get_previous_run_findings, and so never narrated a drift that
+    had genuinely happened. The baseline is handed to it instead."""
+    first, _, _ = _run(_sweep_script(BUCKET_BAD))
+
+    second_model = ScriptedModel([{"text": "Done."}])
+    from agent.attest import ALL_TOOLS, run_sweep
+    from agent.instructions import SYSTEM_PROMPT
+    from strands import Agent
+
+    agent = Agent(model=second_model, tools=ALL_TOOLS, system_prompt=SYSTEM_PROMPT)
+    run_sweep(trigger="golden", agent=agent)
+
+    # The scripted model records the messages it is sent via seen_* only for
+    # system prompt; assert on the manifest directly instead.
+    from tools import state
+    from agent.instructions import run_manifest
+
+    prev = state.previous_run("run-not-this-one")
+    manifest = run_manifest(
+        "run-x", REGION, "manual",
+        {
+            "previous_run": prev["run_id"],
+            "finished_at": prev.get("finished_at"),
+            "verdicts": {c["control_id"]: c["verdict"]
+                         for c in state.get_controls(prev["run_id"])},
+        },
+    )
+    assert "ctrl-s3-encryption: FAIL" in manifest
+    assert "regression" in manifest.lower()
+
+
+def test_manifest_says_so_when_there_is_no_baseline(aws):
+    from agent.instructions import run_manifest
+
+    m = run_manifest("run-x", REGION, "manual", None)
+    assert "no previous completed run" in m.lower()
+    assert "baseline" in m.lower()
+
+
+def test_an_empty_closing_message_falls_back_to_a_derived_summary(aws):
+    """The verdicts are the substance, so the run is complete — but the packet
+    would otherwise show a blank summary."""
+    from tools import state
+
+    script = _sweep_script(BUCKET_BAD)[:-1] + [{"text": ""}]
+    run_id, _, _ = _run(script)
+
+    run = state.get_run(run_id)
+    assert run["status"] == "COMPLETE"
+    assert "did not return a closing summary" in run["summary"]
+    assert "1 controls assessed" in run["summary"]
+    assert "ctrl-s3-encryption" in run["summary"]

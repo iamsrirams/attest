@@ -89,8 +89,24 @@ def run_sweep(trigger: str = "manual", run_id: str | None = None, agent: Agent |
     agent = agent or build_agent(
         trace_attrs=telemetry.trace_attributes(run_id, trigger, AWS_REGION)
     )
+
+    # Hand the agent last run's verdicts up front rather than relying on it to
+    # fetch them. `get_previous_run_findings` still exists for re-checking.
+    prev = state.previous_run(run_id)
+    previous = (
+        {
+            "previous_run": prev["run_id"],
+            "finished_at": prev.get("finished_at"),
+            "verdicts": {
+                c["control_id"]: c["verdict"] for c in state.get_controls(prev["run_id"])
+            },
+        }
+        if prev
+        else None
+    )
+
     try:
-        result = agent(run_manifest(run_id, AWS_REGION, trigger))
+        result = agent(run_manifest(run_id, AWS_REGION, trigger, previous))
     except Exception as e:  # noqa: BLE001 — a crashed sweep must still be recorded
         state.finish_run(run_id, "FAILED", f"{type(e).__name__}: {e}")
         raise
@@ -114,8 +130,45 @@ def run_sweep(trigger: str = "manual", run_id: str | None = None, agent: Agent |
         )
         return run_id, agent, result
 
+    # A sweep can record every verdict and still return no closing text — seen
+    # when the model's final message was empty. The verdicts are the substance,
+    # so the run is genuinely complete; but the packet and the dashboard would
+    # show a blank summary. Fall back to a factual one derived from the recorded
+    # verdicts, and label it, so nobody mistakes it for the agent's own words.
+    if not state.clean_summary(summary):
+        summary = _fallback_summary(run_id)
+
     state.finish_run(run_id, "COMPLETE", summary)
     return run_id, agent, result
+
+
+def _fallback_summary(run_id: str) -> str:
+    """Describe the run from its recorded verdicts. Derived, never invented."""
+    controls = state.get_controls(run_id)
+    counts: dict[str, int] = {}
+    for c in controls:
+        counts[c["verdict"]] = counts.get(c["verdict"], 0) + 1
+
+    failing = sorted(c["control_id"] for c in controls if c["verdict"] == "FAIL")
+    unknown = sorted(
+        c["control_id"] for c in controls if c["verdict"] == "INDETERMINATE"
+    )
+
+    parts = [
+        "The agent did not return a closing summary, so this is generated from "
+        "the recorded verdicts.",
+        "",
+        f"{len(controls)} controls assessed: "
+        + ", ".join(f"{n} {v.lower()}" for v, n in sorted(counts.items())),
+    ]
+    if failing:
+        parts.append(f"Failing: {', '.join(failing)}.")
+    if unknown:
+        parts.append(
+            f"Could not be checked: {', '.join(unknown)}. Their state is unknown, "
+            "not compliant."
+        )
+    return "\n".join(parts)
 
 
 def resume_after_decision(run_id: str, approval_id: str, agent: Agent | None = None):

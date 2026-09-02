@@ -123,20 +123,50 @@ resources and appear under their real names.
 """
 
 
-def run_manifest(run_id: str, region: str, trigger: str) -> str:
+def run_manifest(
+    run_id: str,
+    region: str,
+    trigger: str,
+    previous: dict | None = None,
+) -> str:
     """The first user message: the volatile, per-run half of the prompt.
 
     Kept out of SYSTEM_PROMPT so the cached prefix stays byte-stable.
+
+    The previous run's verdicts are included here rather than left to a tool
+    call. Observed in a real sweep: the agent went straight to the evidence
+    tools, never called `get_previous_run_findings`, and so never narrated the
+    drift — even though a control had genuinely flipped. Drift is a headline
+    feature; it should not depend on the model remembering to look it up.
     """
+    if previous and previous.get("verdicts"):
+        lines = "\n".join(
+            f"    {cid}: {v}" for cid, v in sorted(previous["verdicts"].items())
+        )
+        baseline = f"""
+Previous run ({previous['previous_run']}, finished {previous.get('finished_at', '?')}):
+
+{lines}
+
+Compare your verdicts against these. Lead your summary with anything that was
+PASS and is now failing — that is a regression nobody noticed. Also call out
+anything you have fixed, and anything still failing from last time.
+"""
+    else:
+        baseline = """
+There is no previous completed run, so this sweep is the baseline. Say so in
+your summary rather than implying nothing has changed.
+"""
+
     return f"""\
 Begin a compliance sweep.
 
   run_id:  {run_id}
   region:  {region}
   trigger: {trigger}
-
+{baseline}
 Assess every control in the catalog, record a verdict with cited evidence for
-each, compare against the previous run, and finish with the founder summary.
+each, and finish with the founder summary.
 """
 
 
