@@ -1,0 +1,961 @@
+<title>Attest</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;450;500;600&family=Instrument+Serif:ital@0;1&display=swap">
+
+<style>
+  /* - tokens -
+     Light palette defined in full on bare :root. Dark redefines tokens
+     only, guarded so an explicit light choice beats a dark OS.          */
+  :root {
+    --paper:      #F3F4F2;
+    --paper-2:    #E9EBE7;
+    --raised:     #FBFBFA;
+    --ink:        #14181D;
+    --ink-soft:   #4B545C;
+    --ink-faint:  #79838B;
+    --rule:       #D5D9D3;
+    --rule-soft:  #E3E6E1;
+
+    --accent:     #2F7D6E;   /* verdigris &mdash; institutional patina        */
+    --accent-dim: #E0EBE7;
+    --seal:       #9A6B24;   /* aged brass &mdash; the human-decision moment  */
+    --seal-dim:   #F2E9D9;
+
+    --pass:       #37704A;
+    --fail:       #A93A31;
+    --partial:    #8E6820;
+    --indet:      #6E7681;
+
+    --shadow: 0 1px 2px rgba(20,24,29,.05), 0 8px 24px -12px rgba(20,24,29,.14);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:      #0E1218;
+      --paper-2:    #141920;
+      --raised:     #161C23;
+      --ink:        #E4E8E9;
+      --ink-soft:   #9AA5AE;
+      --ink-faint:  #6C777F;
+      --rule:       #262E37;
+      --rule-soft:  #1D242C;
+
+      --accent:     #58B7A3;
+      --accent-dim: #16302C;
+      --seal:       #D2A254;
+      --seal-dim:   #2B2416;
+
+      --pass:       #64B57C;
+      --fail:       #E0736A;
+      --partial:    #D2A254;
+      --indet:      #87929B;
+
+      --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px -14px rgba(0,0,0,.7);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:      #0E1218;
+    --paper-2:    #141920;
+    --raised:     #161C23;
+    --ink:        #E4E8E9;
+    --ink-soft:   #9AA5AE;
+    --ink-faint:  #6C777F;
+    --rule:       #262E37;
+    --rule-soft:  #1D242C;
+
+    --accent:     #58B7A3;
+    --accent-dim: #16302C;
+    --seal:       #D2A254;
+    --seal-dim:   #2B2416;
+
+    --pass:       #64B57C;
+    --fail:       #E0736A;
+    --partial:    #D2A254;
+    --indet:      #87929B;
+
+    --shadow: 0 1px 2px rgba(0,0,0,.4), 0 10px 30px -14px rgba(0,0,0,.7);
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", ui-sans-serif, -apple-system, "Segoe UI", sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .col { max-width: 60rem; margin: 0 auto; padding: 0 1.5rem; }
+  .narrow { max-width: 42rem; }
+
+  h1, h2, h3 { text-wrap: balance; margin: 0; }
+
+  .display {
+    font-family: "Instrument Serif", Georgia, serif;
+    font-weight: 400;
+    letter-spacing: -0.005em;
+    line-height: 1.14;
+  }
+
+  .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-size: .69rem;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+  }
+
+  .mono { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; }
+
+  p { margin: 0 0 1.1rem; }
+  .lede { font-size: 1.14rem; line-height: 1.62; color: var(--ink-soft); }
+  strong { font-weight: 600; color: var(--ink); }
+
+  /* - hero - */
+  .hero {
+    border-bottom: 1px solid var(--rule);
+    background: var(--paper-2);
+    padding: 5.5rem 0 4rem;
+  }
+  .wordmark {
+    display: flex; align-items: baseline; gap: .7rem; margin-bottom: 3.2rem;
+  }
+  .wordmark .name {
+    font-family: "Instrument Serif", Georgia, serif;
+    font-size: 1.5rem; letter-spacing: .01em;
+  }
+  .wordmark .rule { flex: 1; height: 1px; background: var(--rule); }
+
+  .hero h1 { font-size: clamp(2.7rem, 6.4vw, 4.6rem); margin-bottom: 1.4rem; }
+  .hero h1 em { font-style: italic; color: var(--accent); }
+  .hero .lede { max-width: 36rem; font-size: 1.2rem; }
+
+  .hero-meta {
+    display: flex; flex-wrap: wrap; gap: .5rem 1.6rem;
+    margin-top: 2.4rem; padding-top: 1.4rem; border-top: 1px solid var(--rule);
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-size: .75rem; color: var(--ink-faint);
+  }
+
+  /* - verdict card: the thesis object - */
+  .verdict {
+    background: var(--raised);
+    border: 1px solid var(--rule);
+    border-left: 3px solid var(--rule);
+    border-radius: 3px;
+    padding: 1rem 1.15rem;
+    box-shadow: var(--shadow);
+  }
+  .verdict.is-fail    { border-left-color: var(--fail); }
+  .verdict.is-pass    { border-left-color: var(--pass); }
+  .verdict.is-partial { border-left-color: var(--partial); }
+
+  .verdict-head {
+    display: flex; align-items: center; gap: .55rem; flex-wrap: wrap;
+    margin-bottom: .45rem;
+  }
+  .tag {
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-size: .66rem; font-weight: 600; letter-spacing: .1em;
+  }
+  .tag.pass { color: var(--pass); }
+  .tag.fail { color: var(--fail); }
+  .tag.partial { color: var(--partial); }
+  .tag.indet { color: var(--indet); }
+
+  .chip {
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-size: .6rem; letter-spacing: .07em; text-transform: uppercase;
+    padding: .08rem .38rem; border: 1px solid var(--rule);
+    border-radius: 2px; color: var(--ink-faint);
+  }
+  .chip.crit { color: var(--fail); border-color: var(--fail); }
+  .verdict-head .ref { margin-left: auto; font-size: .68rem; color: var(--ink-faint); }
+
+  .verdict h3 { font-size: .97rem; font-weight: 600; margin-bottom: .18rem; }
+  .verdict p  { font-size: .87rem; color: var(--ink-soft); margin: 0; }
+
+  .cite {
+    display: flex; align-items: center; gap: .5rem;
+    margin-top: .7rem; padding-top: .6rem; border-top: 1px dashed var(--rule);
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-size: .68rem; color: var(--ink-faint);
+  }
+  .cite .id { color: var(--accent); }
+
+  /* - sections - */
+  section { padding: 4.6rem 0; border-bottom: 1px solid var(--rule-soft); }
+  section.alt { background: var(--paper-2); }
+  .sec-head { margin-bottom: 2.2rem; }
+  .sec-head .eyebrow { display: block; margin-bottom: .8rem; }
+  .sec-head h2 { font-size: clamp(1.75rem, 3.4vw, 2.5rem); }
+  .sec-head .lede { margin-top: 1rem; max-width: 42rem; }
+
+  /* claim &harr; proof: the page's recurring structure */
+  .claim-proof {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 2.4rem;
+    align-items: start;
+  }
+  @media (max-width: 46rem) { .claim-proof { grid-template-columns: 1fr; gap: 1.6rem; } }
+
+  .claim .display { font-size: 1.65rem; margin-bottom: .9rem; }
+  .claim p { color: var(--ink-soft); font-size: .95rem; }
+
+  .proof {
+    background: var(--raised); border: 1px solid var(--rule);
+    border-radius: 3px; overflow: hidden; box-shadow: var(--shadow);
+  }
+  .proof-label {
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-size: .64rem; letter-spacing: .13em; text-transform: uppercase;
+    color: var(--ink-faint);
+    padding: .55rem .85rem; border-bottom: 1px solid var(--rule);
+    background: var(--paper-2);
+  }
+  pre {
+    margin: 0; padding: .9rem; overflow-x: auto;
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-size: .72rem; line-height: 1.6; color: var(--ink-soft);
+  }
+  pre .k { color: var(--accent); }
+  pre .c { color: var(--ink-faint); font-style: italic; }
+  pre .f { color: var(--fail); }
+  pre .p { color: var(--pass); }
+
+  /* trace rows: the shared-evidence proof */
+  .trace { border: 1px solid var(--rule); border-radius: 3px; overflow: hidden; background: var(--raised); }
+  .trace-row {
+    display: flex; gap: .8rem; align-items: baseline;
+    padding: .5rem .85rem; border-bottom: 1px solid var(--rule-soft);
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-size: .74rem;
+  }
+  .trace-row:last-child { border-bottom: none; }
+  .trace-row .n { color: var(--ink-faint); font-size: .66rem; min-width: 1.6rem; }
+  .trace-row .t { font-weight: 500; }
+  .trace-row .d { margin-left: auto; color: var(--ink-faint); font-size: .69rem; text-align: right; }
+  .trace-row.hi { background: var(--accent-dim); }
+  .trace-row.hi .d { color: var(--accent); }
+
+  /* stat band */
+  .stats {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    gap: 1px; background: var(--rule);
+    border: 1px solid var(--rule); border-radius: 3px; overflow: hidden;
+  }
+  @media (max-width: 40rem) { .stats { grid-template-columns: repeat(2, 1fr); } }
+  .stat { background: var(--raised); padding: 1.1rem 1rem; }
+  .stat .v {
+    font-family: "Instrument Serif", Georgia, serif;
+    font-size: 2rem; line-height: 1; font-variant-numeric: tabular-nums;
+  }
+  .stat .l {
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-size: .63rem; letter-spacing: .1em; text-transform: uppercase;
+    color: var(--ink-faint); margin-top: .4rem;
+  }
+
+  /* the ordered approval sequence &mdash; numbering is real here */
+  .steps { display: grid; gap: 0; margin-top: .5rem; }
+  .step {
+    display: grid; grid-template-columns: 2.6rem 1fr; gap: 1rem;
+    padding: 1.05rem 0; border-top: 1px solid var(--rule-soft);
+  }
+  .step:last-child { border-bottom: 1px solid var(--rule-soft); }
+  .step .num {
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-size: .72rem; color: var(--ink-faint); padding-top: .18rem;
+    font-variant-numeric: tabular-nums;
+  }
+  .step h4 { margin: 0 0 .2rem; font-size: .95rem; font-weight: 600; }
+  .step p { margin: 0; font-size: .89rem; color: var(--ink-soft); }
+  .step.gate .num { color: var(--seal); }
+  .step.gate h4 { color: var(--seal); }
+
+  /* the bug entries &mdash; credibility section */
+  .bug {
+    border-left: 2px solid var(--rule); padding: .1rem 0 .1rem 1.15rem;
+    margin-bottom: 1.9rem;
+  }
+  .bug:last-child { margin-bottom: 0; }
+  .bug h4 {
+    margin: 0 0 .35rem; font-size: .97rem; font-weight: 600;
+  }
+  .bug p { margin: 0 0 .5rem; font-size: .9rem; color: var(--ink-soft); }
+  .bug .fix {
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-size: .71rem; color: var(--accent);
+  }
+
+  /* diagram */
+  figure { margin: 0; }
+  figure svg { display: block; width: 100%; height: auto; max-width: 100%; }
+  figcaption {
+    margin-top: 1rem; font-size: .82rem; color: var(--ink-faint);
+    max-width: 44rem;
+  }
+
+  /* verified table */
+  .table-wrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 3px; }
+  table { border-collapse: collapse; width: 100%; min-width: 34rem; background: var(--raised); }
+  th, td {
+    text-align: left; padding: .62rem .85rem;
+    border-bottom: 1px solid var(--rule-soft); font-size: .84rem;
+  }
+  th {
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-size: .63rem; letter-spacing: .11em; text-transform: uppercase;
+    color: var(--ink-faint); background: var(--paper-2);
+    border-bottom: 1px solid var(--rule);
+  }
+  tr:last-child td { border-bottom: none; }
+  td.st { font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace; font-size: .72rem; white-space: nowrap; }
+  td.st.ok { color: var(--pass); }
+  td.st.no { color: var(--indet); }
+
+  .callout {
+    border: 1px solid var(--seal); background: var(--seal-dim);
+    border-radius: 3px; padding: 1.05rem 1.2rem;
+  }
+  .callout .eyebrow { color: var(--seal); margin-bottom: .5rem; display: block; }
+  .callout p { margin: 0; font-size: .9rem; color: var(--ink); }
+
+  .stack {
+    display: flex; flex-wrap: wrap; gap: .4rem;
+  }
+  .stack span {
+    font-family: "IBM Plex Mono", ui-monospace, Menlo, monospace;
+    font-size: .7rem; padding: .22rem .5rem;
+    border: 1px solid var(--rule); border-radius: 2px; color: var(--ink-soft);
+  }
+
+  footer {
+    padding: 3.4rem 0 4.5rem; color: var(--ink-faint); font-size: .82rem;
+  }
+  footer a { color: var(--accent); }
+
+  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 2.2rem; }
+  @media (max-width: 46rem) { .grid-2 { grid-template-columns: 1fr; gap: 1.5rem; } }
+
+  .mt { margin-top: 2.2rem; }
+  .mt-s { margin-top: 1.2rem; }
+
+
+  /* - print / PDF -
+     Force the light palette: a dark ground wastes ink and reads worse on
+     paper. Keep cards whole across page breaks.                          */
+  @media print {
+    :root, :root[data-theme="dark"] {
+      --paper:      #FFFFFF;
+      --paper-2:    #F4F5F3;
+      --raised:     #FFFFFF;
+      --ink:        #14181D;
+      --ink-soft:   #40484F;
+      --ink-faint:  #6B747C;
+      --rule:       #C9CEC7;
+      --rule-soft:  #DFE3DD;
+      --accent:     #24675B;
+      --accent-dim: #E4EFEB;
+      --seal:       #7E5716;
+      --seal-dim:   #F6EFE1;
+      --pass:       #2C5F3E;
+      --fail:       #93312A;
+      --partial:    #77571A;
+      --indet:      #5B646C;
+      --shadow: none;
+    }
+    body { background: #FFFFFF; font-size: 10.5pt; }
+    @page { margin: 14mm 12mm; }
+
+    .hero { padding: 0 0 1.6rem; page-break-after: avoid; }
+    .hero h1 { font-size: 30pt; }
+    section { padding: 1.7rem 0; page-break-inside: auto; }
+    .sec-head { page-break-after: avoid; }
+    .sec-head h2 { font-size: 17pt; }
+    .col { max-width: none; padding: 0; }
+
+    .verdict, .proof, .trace, .callout, .stats, .table-wrap, figure, .bug, .step {
+      page-break-inside: avoid;
+    }
+    .claim-proof, .grid-2 { gap: 1.2rem; }
+    pre { font-size: 7.6pt; }
+    .timeline, .evjson { max-height: none; }
+    a { text-decoration: none; }
+  }
+
+  a:focus-visible, button:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 2px;
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    .verdict { transition: box-shadow .2s ease; }
+  }
+</style>
+
+<div class="hero">
+  <div class="col">
+    <div class="wordmark">
+      <span class="name">Attest</span>
+      <span class="rule"></span>
+      <span class="eyebrow">AWS Agents for Humans &middot; Professional Agents</span>
+    </div>
+
+    <h1 class="display">Every claim it makes,<br>you can <em>check</em>.</h1>
+
+    <p class="lede">
+      An autonomous compliance agent that audits a live AWS account against SOC&nbsp;2
+      controls, cites the exact tool call behind every verdict, and fixes what it
+      finds &mdash; only after a human approves, enforced in code.
+    </p>
+
+    <div class="mt">
+      <div class="verdict is-partial">
+        <div class="verdict-head">
+          <span class="tag partial">PARTIAL</span>
+          <span class="chip">high</span>
+          <span class="ref mono">CC6.7 &middot; CC6.8</span>
+        </div>
+        <h3>All S3 buckets encrypt with a customer-managed KMS key</h3>
+        <p>One bucket could not be read due to an AccessDenied error, so its state
+           is unknown &mdash; not compliant.</p>
+        <div class="cite">
+          <span class="id">ev-4470acf11d</span>
+          <span>list_s3_encryption_status</span>
+          <span>&middot;</span>
+          <span>2026-09-02T17:12:29Z</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="hero-meta">
+      <span>Strands Agents SDK</span>
+      <span>Amazon Bedrock</span>
+      <span>19 tools</span>
+      <span>10 controls</span>
+      <span>102 tests</span>
+    </div>
+  </div>
+</div>
+
+<!-- - the problem - -->
+<section>
+  <div class="col narrow">
+    <div class="sec-head">
+      <span class="eyebrow">The problem</span>
+      <h2 class="display">Finding misconfigurations is easy. Proving the answer is not.</h2>
+    </div>
+
+    <p class="lede">
+      A startup closes its first enterprise customer, and a security questionnaire
+      arrives. Do all IAM users have MFA? Is data encrypted at rest? Prove it.
+    </p>
+    <p>
+      There is no compliance team &mdash; just a two-year-old AWS account nobody has fully
+      audited and a deal waiting on the answers. Plenty of scanners will list what is
+      wrong. None of them will tell an auditor <em>how you know</em>, or when you
+      checked, or what happens the next time something drifts.
+    </p>
+    <p>
+      An auditor does not want a dashboard. They want the observation, the timestamp,
+      and the chain back to the API that produced it.
+    </p>
+  </div>
+</section>
+
+<!-- - why it's an agent - -->
+<section class="alt">
+  <div class="col">
+    <div class="sec-head narrow">
+      <span class="eyebrow">Why it is an agent, not a scanner</span>
+      <h2 class="display">The catalog says which controls matter. It never says what to call.</h2>
+    </div>
+
+    <div class="claim-proof">
+      <div class="claim">
+        <p class="display">One report, two verdicts.</p>
+        <p>
+          Nothing in the codebase iterates the catalog to &ldquo;run the sweep.&rdquo; The agent
+          reads it and decides what to fetch, in what order, and when one result has
+          already answered a second control.
+        </p>
+        <p>
+          In this run it worked out that the IAM credential report settles both MFA
+          coverage and key rotation &mdash; and did not fetch it twice. That inference is
+          not scripted anywhere.
+        </p>
+      </div>
+
+      <div>
+        <div class="trace">
+          <div class="trace-row hi">
+            <span class="n">01</span>
+            <span class="t">get_iam_credential_report</span>
+            <span class="d">14 users, 4 without MFA, 11 stale keys</span>
+          </div>
+          <div class="trace-row hi">
+            <span class="n">02</span>
+            <span class="t">record_finding</span>
+            <span class="d">FAIL &middot; ctrl-mfa-users</span>
+          </div>
+          <div class="trace-row hi">
+            <span class="n">03</span>
+            <span class="t">record_finding</span>
+            <span class="d">FAIL &middot; ctrl-key-rotation</span>
+          </div>
+          <div class="trace-row">
+            <span class="n">04</span>
+            <span class="t">get_account_summary</span>
+            <span class="d">root MFA on, 0 root keys</span>
+          </div>
+          <div class="trace-row">
+            <span class="n">05</span>
+            <span class="t">list_s3_encryption_status</span>
+            <span class="d">14 buckets, 12 without a CMK, 1 unreadable</span>
+          </div>
+          <div class="trace-row">
+            <span class="n">06</span>
+            <span class="t">list_open_security_groups</span>
+            <span class="d">13 scanned, 9 open on 22/3389</span>
+          </div>
+        </div>
+        <p class="mt-s" style="font-size:.78rem;color:var(--ink-faint);">
+          Audit log from a real sweep. Rows 01&ndash;03 share one piece of evidence.
+        </p>
+      </div>
+    </div>
+
+    <div class="claim-proof mt" style="margin-top:3.4rem;">
+      <div class="claim">
+        <p class="display">An error is not a pass.</p>
+        <p>
+          One seeded bucket denies permission to read its encryption configuration.
+          The tool returns <span class="mono">null</span> with an error code rather
+          than raising, and the agent has to decide what that means.
+        </p>
+        <p>
+          Not <strong>PASS</strong>, which would be a false assurance an auditor
+          eventually catches. Not <strong>FAIL</strong>, which would be a finding
+          nobody observed. Not a crash. That judgment is the product, and it is not
+          expressible as a fixed sequence of API calls.
+        </p>
+      </div>
+
+      <div class="proof">
+        <div class="proof-label">tool output &rarr; the agent's decision</div>
+<pre><span class="c">// what the tool returned</span>
+{
+  <span class="k">"bucket"</span>: "attest-demo-denied-&hellip;",
+  <span class="k">"encrypted"</span>: null,
+  <span class="k">"meets_kms_requirement"</span>: null,
+  <span class="k">"error"</span>: <span class="f">"AccessDenied"</span>
+}
+
+<span class="c">// what it recorded</span>
+{
+  <span class="k">"verdict"</span>: <span class="f">"PARTIAL"</span>,
+  <span class="k">"rationale"</span>: "One bucket could not be
+     read due to an AccessDenied error."
+}</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- - the security model - -->
+<section>
+  <div class="col">
+    <div class="sec-head narrow">
+      <span class="eyebrow">The security model</span>
+      <h2 class="display">Two places where control leaves the model.</h2>
+      <p class="lede">
+        A model saying &ldquo;the user approved this&rdquo; is not authorization. Both boundaries
+        are enforced in code, in the tool body &mdash; never delegated to the system prompt.
+      </p>
+    </div>
+
+    <figure>
+      <svg viewBox="0 0 860 348" role="img"
+           aria-label="Read results pass through a redaction boundary before reaching the model, so it only ever sees pseudonyms. Writes pass through an approval gate that checks an APPROVED record bound to one action and resource, plus a prefix guard, before touching AWS.">
+        <defs>
+          <marker id="ar" viewBox="0 0 10 10" refX="9" refY="5"
+                  markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor"/>
+          </marker>
+          <marker id="ar-t" viewBox="0 0 10 10" refX="9" refY="5"
+                  markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#3E9C89"/>
+          </marker>
+          <marker id="ar-s" viewBox="0 0 10 10" refX="9" refY="5"
+                  markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#C08F42"/>
+          </marker>
+        </defs>
+
+        <g font-family="IBM Plex Mono, monospace" fill="currentColor">
+
+          <rect x="8" y="150" width="118" height="58" rx="3"
+                fill="none" stroke="currentColor" stroke-width="1.3"/>
+          <text x="67" y="175" text-anchor="middle" font-size="13">AWS account</text>
+          <text x="67" y="192" text-anchor="middle" font-size="11" opacity=".6">live state</text>
+
+          <line x1="126" y1="166" x2="212" y2="166" stroke="currentColor"
+                stroke-width="1.3" marker-end="url(#ar)"/>
+          <text x="169" y="158" text-anchor="middle" font-size="11">read</text>
+
+          <rect x="216" y="134" width="146" height="70" rx="3"
+                fill="none" stroke="#3E9C89" stroke-width="1.9"/>
+          <text x="289" y="160" text-anchor="middle" font-size="13" fill="#3E9C89">redaction</text>
+          <text x="289" y="177" text-anchor="middle" font-size="13" fill="#3E9C89">boundary</text>
+          <text x="289" y="194" text-anchor="middle" font-size="10.5" fill="#3E9C89" opacity=".8">inside @tool</text>
+
+          <line x1="362" y1="166" x2="448" y2="166" stroke="#3E9C89"
+                stroke-width="1.5" marker-end="url(#ar-t)"/>
+          <text x="405" y="185" text-anchor="middle" font-size="11" fill="#3E9C89">pseudonyms</text>
+
+          <rect x="452" y="142" width="128" height="50" rx="3"
+                fill="none" stroke="currentColor" stroke-width="1.5"/>
+          <text x="516" y="165" text-anchor="middle" font-size="13">agent</text>
+          <text x="516" y="182" text-anchor="middle" font-size="11" opacity=".6">Sonnet 4.5</text>
+
+          <line x1="516" y1="142" x2="516" y2="100" stroke="#C08F42"
+                stroke-width="1.5" marker-end="url(#ar-s)"/>
+          <text x="527" y="126" font-size="11" fill="#C08F42">requests</text>
+
+          <rect x="416" y="40" width="200" height="58" rx="3"
+                fill="none" stroke="#C08F42" stroke-width="1.7"/>
+          <text x="516" y="64" text-anchor="middle" font-size="13" fill="#C08F42">human decides</text>
+          <text x="516" y="82" text-anchor="middle" font-size="10.5" fill="#C08F42" opacity=".85">APPROVED &#183; 24h TTL &#183; one use</text>
+
+          <line x1="616" y1="69" x2="722" y2="69" stroke="#C08F42"
+                stroke-width="1.5" marker-end="url(#ar-s)"/>
+          <line x1="722" y1="69" x2="722" y2="132" stroke="#C08F42" stroke-width="1.5"/>
+
+          <rect x="624" y="134" width="200" height="98" rx="3"
+                fill="none" stroke="#C08F42" stroke-width="1.9"/>
+          <text x="724" y="157" text-anchor="middle" font-size="13" fill="#C08F42">approval gate</text>
+          <line x1="642" y1="168" x2="806" y2="168" stroke="#C08F42" stroke-width=".9" opacity=".4"/>
+          <text x="642" y="187" font-size="10.5" fill="#C08F42">1 &#183; record bound to</text>
+          <text x="654" y="201" font-size="10.5" fill="#C08F42">(action, resource)</text>
+          <text x="642" y="221" font-size="10.5" fill="#C08F42">2 &#183; demo-prefix guard</text>
+
+          <line x1="580" y1="178" x2="620" y2="178" stroke="currentColor"
+                stroke-width="1.3" marker-end="url(#ar)"/>
+
+          <path d="M 724 232 L 724 272 L 67 272 L 67 210"
+                fill="none" stroke="#C08F42" stroke-width="1.5" marker-end="url(#ar-s)"/>
+          <text x="396" y="265" text-anchor="middle" font-size="11" fill="#C08F42">write, then re-read to verify</text>
+
+          <line x1="8" y1="300" x2="852" y2="300" stroke="currentColor" stroke-width=".9" opacity=".22"/>
+          <text x="8" y="320" font-size="11.5" opacity=".72">Evidence tools hold no write permission at all &#8212; a sweep cannot modify what it audits.</text>
+          <text x="8" y="339" font-size="11.5" opacity=".72">The prefix guard is enforced twice, independently: in the tool body and in the IAM policy.</text>
+        </g>
+      </svg>
+      <figcaption>
+        Reads flow left to right through the redaction boundary, so the model never
+        receives a real IAM user name or email. Writes flow the other way and must
+        clear two independent checks before AWS is touched &mdash; an approval bound to
+        exactly one action on one resource, and a prefix guard that refuses anything
+        outside scope even when the approval is valid.
+      </figcaption>
+    </figure>
+
+    <div class="callout mt">
+      <span class="eyebrow">Verified against a live account</span>
+      <p>
+        No approval, a pending approval, an approval replayed from a different bucket,
+        and an approved-but-out-of-scope resource were each refused with the bucket
+        confirmed unchanged. The correctly bound approval applied, verified itself,
+        and was burned so it could not authorize a second write.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- - the demo moment - -->
+<section class="alt">
+  <div class="col">
+    <div class="sec-head narrow">
+      <span class="eyebrow">The moment it earns trust</span>
+      <h2 class="display">It asks, you decide, it verifies its own work.</h2>
+    </div>
+
+    <div class="grid-2">
+      <div>
+        <div class="steps">
+          <div class="step">
+            <span class="num">01</span>
+            <div>
+              <h4>It finds the gap</h4>
+              <p>A bucket encrypts with SSE-S3, not a customer-managed key &mdash; which is
+                 what enterprise reviews actually ask for.</p>
+            </div>
+          </div>
+          <div class="step gate">
+            <span class="num">02</span>
+            <div>
+              <h4>It asks, in plain language</h4>
+              <p>A pending approval, bound to that one action on that one bucket,
+                 expiring in 24 hours. It does not wait or poll &mdash; it records the
+                 failing verdict and moves on.</p>
+            </div>
+          </div>
+          <div class="step gate">
+            <span class="num">03</span>
+            <div>
+              <h4>You approve</h4>
+              <p>The decision is read from the record, never from the caller. A
+                 crafted request cannot assert that something was approved.</p>
+            </div>
+          </div>
+          <div class="step">
+            <span class="num">04</span>
+            <div>
+              <h4>It applies, then re-reads</h4>
+              <p>The verdict flips on what it observes afterwards &mdash; not on the write
+                 having been attempted.</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <div class="proof">
+          <div class="proof-label">live transcript &middot; attest approve</div>
+<pre>before   <span class="f">AES256</span>          &rarr; FAIL
+         put_bucket_encryption
+after    <span class="p">aws:kms</span>         &rarr; verified
+         customer-managed: <span class="p">true</span>
+
+approval <span class="k">APPLIED</span>  <span class="c">(burned)</span>
+verdict  <span class="f">FAIL</span> &rarr; <span class="p">PASS</span>
+cites    ev-827db398ef
+         <span class="c">collected after the change</span></pre>
+        </div>
+
+        <div class="verdict is-pass mt-s">
+          <div class="verdict-head">
+            <span class="tag pass">PASS</span>
+            <span class="chip">fixed</span>
+            <span class="ref mono">CC6.7 &middot; CC6.8</span>
+          </div>
+          <h3>All S3 buckets encrypt with a customer-managed KMS key</h3>
+          <p>The bucket now uses SSE-KMS with a customer-managed key.</p>
+          <div class="cite">
+            <span class="id">ev-827db398ef</span>
+            <span>re-read after remediation</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="mt">
+      <div class="claim-proof">
+        <div class="claim">
+          <p class="display">And it notices when things slip back.</p>
+          <p>
+            The previous run's verdicts are handed to the agent in its manifest, so
+            drift does not depend on it remembering to look. On a live run where a
+            control had genuinely flipped, it led with the regression.
+          </p>
+        </div>
+        <div class="proof">
+          <div class="proof-label">summary &middot; run 20260902T171229Z</div>
+<pre>The single most urgent issue is the
+failure of ctrl-key-rotation. <span class="f">This is a
+regression from the previous run.</span>
+
+<span class="k">Regressions:</span>
+- ctrl-key-rotation
+
+<span class="k">Fixes:</span>  None.
+
+<span class="k">Still failing:</span>
+- ctrl-mfa-users, ctrl-guardduty,
+  ctrl-open-sgs, ctrl-ebs-default &hellip;</pre>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- - what building it for real found - -->
+<section>
+  <div class="col">
+    <div class="sec-head narrow">
+      <span class="eyebrow">What running it for real found</span>
+      <h2 class="display">Every serious bug lived between two correct layers.</h2>
+      <p class="lede">
+        Unit tests on either side passed throughout. Each was only visible by
+        exercising the whole path with the values a real caller would use.
+      </p>
+    </div>
+
+    <div class="grid-2">
+      <div>
+        <div class="bug">
+          <h4>A verdict could cite evidence that did not exist</h4>
+          <p>
+            <span class="mono">record_finding</span> checked that the citation list was
+            non-empty &mdash; never that the ids were real. A hallucinated id would have been
+            stored looking fully substantiated. For a tool whose entire pitch is
+            traceability, that is the worst available failure.
+          </p>
+          <p class="fix">&rarr; citations validated against what the run archived</p>
+        </div>
+
+        <div class="bug">
+          <h4>An empty sweep was filed as complete</h4>
+          <p>
+            A content filter truncated the model's output mid-answer and the run was
+            recorded <span class="mono">COMPLETE</span> with zero verdicts. For a
+            compliance tool that reads as &ldquo;we checked and found nothing wrong.&rdquo;
+          </p>
+          <p class="fix">&rarr; a sweep that records nothing is now FAILED, explicitly</p>
+        </div>
+
+        <div class="bug">
+          <h4>That empty run then became the drift baseline</h4>
+          <p>
+            Which made every control look new, and would have hidden a regression &mdash;
+            the one thing drift exists to surface.
+          </p>
+          <p class="fix">&rarr; a baseline must have recorded verdicts</p>
+        </div>
+      </div>
+
+      <div>
+        <div class="bug">
+          <h4>The agent would have addressed a bucket that does not exist</h4>
+          <p>
+            Redaction scrubs the account id even from demo names, so the agent saw one
+            name while S3 knew another. Every guard would have reported success right
+            up to the write, which would have failed with
+            <span class="mono">NoSuchBucket</span> &mdash; live, during the demo.
+          </p>
+          <p class="fix">&rarr; names resolved at the two points they meet AWS</p>
+        </div>
+
+        <div class="bug">
+          <h4>Real names reached the trust packet three ways</h4>
+          <p>
+            Through lists of bare strings, through the resume message, and through the
+            remediation tool's own return value. Each time the model wrote the real
+            name into its rationale, and from there it reached the published artifact.
+          </p>
+          <p class="fix">&rarr; redaction applied to every tool whose result reaches the model</p>
+        </div>
+
+        <div class="bug">
+          <h4>An unencrypted S3 bucket cannot exist any more</h4>
+          <p>
+            The planned demo was finding one and encrypting it. Since 2023 S3 applies
+            AES256 as an unremovable baseline. The control was retargeted to test
+            encryption <em>strength</em> &mdash; which is what enterprise reviews ask, and
+            makes the agent distinguish an AWS-managed key from a customer-managed one.
+          </p>
+          <p class="fix">&rarr; a better control than the one originally planned</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- - build - -->
+<section class="alt">
+  <div class="col">
+    <div class="sec-head narrow">
+      <span class="eyebrow">The build</span>
+      <h2 class="display">One agent. Nineteen tools. Nothing scripted.</h2>
+    </div>
+
+    <div class="stats">
+      <div class="stat"><div class="v">19</div><div class="l">tools</div></div>
+      <div class="stat"><div class="v">10</div><div class="l">SOC 2 controls</div></div>
+      <div class="stat"><div class="v">102</div><div class="l">tests</div></div>
+      <div class="stat"><div class="v">6,039</div><div class="l">lines of python</div></div>
+    </div>
+
+    <div class="grid-2 mt">
+      <div>
+        <p>
+          A single Strands agent running Claude Sonnet 4.5 on Bedrock: ten read-only
+          evidence tools, eight control-flow tools, and one approval-gated remediation
+          tool. A sliding window caps context across a long sweep.
+        </p>
+        <p>
+          State lives in DynamoDB &mdash; runs, controls, evidence, approvals with a TTL, and
+          an append-only audit log. Evidence and packets go to S3. The agent is
+          runtime-agnostic: it does not know whether the CLI, a container, Lambda or
+          AgentCore invoked it, and a test enforces that.
+        </p>
+        <div class="stack mt-s">
+          <span>Strands Agents SDK</span><span>Amazon Bedrock</span><span>Python</span>
+          <span>boto3</span><span>DynamoDB</span><span>S3</span><span>Lambda</span>
+          <span>EventBridge</span><span>SES</span><span>KMS</span><span>IAM</span>
+          <span>CloudFormation</span><span>FastAPI</span><span>React</span>
+          <span>OpenTelemetry</span>
+        </div>
+      </div>
+
+      <div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr><th>Capability</th><th>Status</th></tr>
+            </thead>
+            <tbody>
+              <tr><td>Autonomous sweep, 10 controls</td><td class="st ok">verified live</td></tr>
+              <tr><td>Evidence archived &amp; citable</td><td class="st ok">verified live</td></tr>
+              <tr><td>Approval gate, all refusal paths</td><td class="st ok">verified live</td></tr>
+              <tr><td>Approve &rarr; fix &rarr; re-verify</td><td class="st ok">verified live</td></tr>
+              <tr><td>Drift narration</td><td class="st ok">verified live</td></tr>
+              <tr><td>Trust packet, zero identity leaks</td><td class="st ok">verified live</td></tr>
+              <tr><td>CloudFormation stack</td><td class="st ok">deployed, torn down</td></tr>
+              <tr><td>Ad-hoc questions</td><td class="st ok">verified live</td></tr>
+              <tr><td>OpenTelemetry spans</td><td class="st ok">verified</td></tr>
+              <tr><td>Container image</td><td class="st no">not built</td></tr>
+              <tr><td>SES notifications</td><td class="st no">no verified identity</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p class="mt-s" style="font-size:.78rem;color:var(--ink-faint);">
+          Nothing is listed as done unless it was run. The two gaps are stated
+          rather than quietly omitted.
+        </p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- - close - -->
+<section style="border-bottom:none;">
+  <div class="col narrow">
+    <div class="sec-head">
+      <span class="eyebrow">Why it matters</span>
+      <h2 class="display">A prompt asking a model to behave is not a security control.</h2>
+    </div>
+    <p class="lede">
+      Attest is built on the assumption that the agent will sometimes be wrong &mdash; and
+      that being wrong must be survivable. Reads cannot write. Writes need a human
+      decision the model cannot manufacture. Identities never reach the model at all.
+      And every verdict carries the observation that produced it, so a reader never
+      has to take the agent's word for anything.
+    </p>
+    <p>
+      That is what makes the output worth handing to an auditor: not that the agent is
+      reliable, but that you do not need it to be.
+    </p>
+  </div>
+</section>
+
+<footer>
+  <div class="col narrow">
+    <div style="display:flex;flex-wrap:wrap;gap:.6rem 1.6rem;align-items:baseline;">
+      <span class="mono" style="font-size:.72rem;">github.com/iamsrirams/attest</span>
+      <span class="mono" style="font-size:.72rem;">MIT</span>
+      <span class="mono" style="font-size:.72rem;">AWS Agents for Humans &middot; 2026</span>
+    </div>
+  </div>
+</footer>
